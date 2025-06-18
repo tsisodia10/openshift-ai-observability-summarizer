@@ -154,6 +154,35 @@ if page == "📊 Metric Summarizer":
                 st.line_chart(chart_df)
             else:
                 st.info("No data available to generate chart.")
+            
+            # --- 💸 Cost Estimation ---
+            st.markdown("### 💸 Estimated Cost")
+
+            try:
+                prompt_tokens = sum(p["value"] for p in metric_data.get("Prompt Tokens Created", []))
+                output_tokens = sum(p["value"] for p in metric_data.get("Output Tokens Created", []))
+                
+                MODEL_COSTS = {
+                    "GPT-4.1": (0.002, 0.008),
+                    "GPT-4.1 mini": (0.0004, 0.0016),
+                    "GPT-4.1 nano": (0.0001, 0.0004)
+                }
+
+                model_pricing = st.sidebar.selectbox("Cost Estimate Model", list(MODEL_COSTS.keys()))
+                prompt_rate, output_rate = MODEL_COSTS[model_pricing]
+
+                cost_prompt = prompt_tokens * prompt_rate
+                cost_output = output_tokens * output_rate
+
+                total_cost = cost_prompt + cost_output
+
+                st.metric("Total Estimated Cost", f"${total_cost:.4f}")
+                with st.expander("Cost Breakdown"):
+                    st.write(f"📨 Prompt Tokens: {prompt_tokens:.0f} → ${cost_prompt:.4f}")
+                    st.write(f"📝 Output Tokens: {output_tokens:.0f} → ${cost_output:.4f}")
+
+            except Exception as e:
+                st.error(f"Could not estimate cost: {e}")
 
 # --- 🤖 Chat with Prometheus Page ---
 elif page == "🤖 Chat with Prometheus":
