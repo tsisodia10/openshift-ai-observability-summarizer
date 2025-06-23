@@ -1,0 +1,29 @@
+# alerts/templates/cronjob.yaml
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: {{ include "alerts.fullname" . }}
+spec:
+  schedule: {{ .Values.schedule | quote }}
+  concurrencyPolicy: Forbid # Ensure only one job runs at a time
+  suspend: false
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          serviceAccountName: {{ .Values.serviceAccountName }}
+          restartPolicy: OnFailure
+          containers:
+            - name: alert-notifier
+              image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+              imagePullPolicy: {{ .Values.image.pullPolicy }}
+              env:
+                {{- range .Values.env }}
+                - name: {{ .name | quote }}
+                  value: {{ .value | quote }}
+                {{- end }}
+                - name: SLACK_WEBHOOK_URL
+                  valueFrom:
+                    secretKeyRef:
+                      name: {{ .Values.slackWebhook.secretName | quote }}
+                      key: {{ .Values.slackWebhook.secretKey | quote }}
