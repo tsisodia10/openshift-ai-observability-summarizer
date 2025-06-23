@@ -163,9 +163,10 @@ if page == "📊 Metric Summarizer":
                 output_tokens = sum(p["value"] for p in metric_data.get("Output Tokens Created", []))
                 
                 MODEL_COSTS = {
-                    "GPT-4.1": (0.002, 0.008),
-                    "GPT-4.1 mini": (0.0004, 0.0016),
-                    "GPT-4.1 nano": (0.0001, 0.0004)
+                    "GPT-4.1": (0.000002, 0.000008),
+                    "GPT-4.1 mini": (0.0000004, 0.0000016),
+                    "GPT-4.1 nano": (0.0000001, 0.0000004),
+                    "GPT-4o mini": (0.00000015, 0.0000006)
                 }
 
                 model_pricing = st.sidebar.selectbox("Cost Estimate Model", list(MODEL_COSTS.keys()))
