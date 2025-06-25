@@ -72,13 +72,12 @@ def get_multi_models():
 @st.cache_data(ttl=300)
 def get_model_config():
     """Fetch model configuration from API"""
-    return {"meta-llama/Llama-3.2-3B-Instruct":{"external":False,"requiresApiKey":False,"serviceName":"llama-3-2-3b-instruct"},"openai/gpt-4o-mini":{"external":True,"requiresApiKey":True,"serviceName":None,"provider":"openai","apiUrl":"https://api.openai.com/v1/chat/completions","modelName":"gpt-4o-mini", "cost": {"prompt_rate": 0.00000015, "output_rate": 0.0000006}}}
-    # try:
-    #     res = requests.get(f"{API_URL}/model_config")
-    #     return res.json()
-    # except Exception as e:
-    #     st.sidebar.error(f"Error fetching model config: {e}")
-    #     return {}
+    try:
+        res = requests.get(f"{API_URL}/model_config")
+        return res.json()
+    except Exception as e:
+        st.sidebar.error(f"Error fetching model config: {e}")
+        return {}
 
 
 def model_requires_api_key(model_id, model_config):
