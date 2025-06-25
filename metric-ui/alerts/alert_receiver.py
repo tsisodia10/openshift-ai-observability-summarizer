@@ -2,11 +2,17 @@ import requests
 import json
 import os
 import datetime
+from llama_stack_client import LlamaStackClient
 
 # --- CONFIG ---
 ALERTMANAGER_URL = os.getenv("ALERTMANAGER_URL", "http://localhost:9093")
 SLACK_WEBHOOK_URL = os.getenv("SLACK_WEBHOOK_URL", "")
+LLAMA_STACK_URL = os.getenv("LLAMA_STACK_URL", "http://localhost:8321")
 TIME_WINDOW = int(os.getenv("TIME_WINDOW", 60))
+
+# --- LLAMASTACK SETUP ---
+client = LlamaStackClient(base_url=LLAMA_STACK_URL)
+llm = next(m for m in client.models.list() if m.model_type == "llm")
 
 # pull active alerts from Alertmanager
 def get_active_alerts():
@@ -33,15 +39,45 @@ def send_slack_message(payload):
         print(f"Error sending Slack message: {e}")
         return False
     
+# generate a description based on the alert labels
+def generate_description(labels):
+    labels = json.dumps(labels)
+    prompt = """
+    You are an AI assistant designed to generate concise, informative, and *technically detailed* Slack message descriptions for OpenShift vLLM alerts. Your task is to analyze the provided alert data, *especially the 'expr' field*, and create a clear, actionable description of the problem.
+
+    Focus on explaining:
+    1.  **What the alert signifies:** Briefly summarize the general nature of the alert.
+    2.  **The specific conditions triggering the alert:** Interpret the 'expr' value to explain what the issue is in plain, understandable English. Do NOT mention "Prometheus Query Language" or include the raw expression string in your explanation. Instead, describe the actual metric and threshold being monitored.
+    3.  **Affected components:** Mention the `model_name`, `pod`, `namespace`, and `service` to clearly identify what is impacted.
+    4.  **Actionability (if implied):** Suggest what the alert implies (e.g., "This indicates a potential performance degradation," "This suggests the service is not responding as expected").
+
+    If the `test_alert` label is present and set to 'true', explicitly state that this is for testing purposes and does not indicate a real issue, and keep the description brief.
+
+    Provide only the description text, starting off with "This alert..." Do not add any prefixes like 'ALERT:' or 'Severity:' or a separate summary line. The output should be ready to be embedded directly into a Slack message.
+
+    Here is the alert data: 
+    """
+    response = client.inference.chat_completion(
+        model_id=llm.identifier,
+        messages=[
+            {"role": "system", "content": prompt},
+            {"role": "user", "content": labels},
+        ],
+        stream=False
+    )
+
+    return response.completion_message.content
+    
 # formats slack message for a single alert
 def format_slack_message(alert_data):
     alertname = alert_data['labels'].get('alertname', 'N/A')
     severity = alert_data['labels'].get('severity', 'info').upper()
-    summary = alert_data['annotations'].get('summary', 'No summary provided.')
-    description = alert_data['annotations'].get('description', 'No description provided.')
     generator_url = alert_data.get('generatorURL', 'No generator URL.')
     starts_at_iso = alert_data.get('startsAt')
 
+    description = generate_description(alert_data['labels'])
+
+    starts_at_iso = alert_data.get('startsAt')
     starts_at_formatted = "N/A"
     if starts_at_iso:
         try:
@@ -60,8 +96,7 @@ def format_slack_message(alert_data):
 
     message_text = (
         f"{color_emoji}*ALERT: {alertname} [{severity}]*\n\n"
-        f"*{summary}*\n\n"
-        f"{description}\n"
+        f"{description}\n\n"
         f"Started At: {starts_at_formatted}\n"
         f"<{generator_url}|View on console>"
     )
@@ -100,9 +135,15 @@ def process_vllm_alerts_and_notify(alerts, time_window=TIME_WINDOW):
                     except ValueError:
                         print(f"Warning: Could not parse startsAt time for alert '{alertname}': {starts_at_iso}")
 
+def generate_test():
+    alert = json.loads('{"alertname": "VLLMHighAverageInferenceTime", "container": "kserve-container", "endpoint": "vllm-serving-runtime-metrics", "engine": "0", "expr": "rate(vllm:request_inference_time_seconds_sum[5m]) / rate(vllm:request_inference_time_seconds_count[5m]) > 2", "for": "5m", "instance": "10.129.2.73:8080", "job": "llama-3-2-3b-instruct-metrics", "model_name": "meta-llama/Llama-3.2-3B-Instruct", "namespace": "m3", "pod": "llama-3-2-3b-instruct-predictor-9fd74489-c6dwt", "prometheus": "openshift-user-workload-monitoring/user-workload", "service": "llama-3-2-3b-instruct-metrics", "severity": "warning"}')
+    desc = generate_description(alert)
+    print(desc)
+
 def main():
     alerts = get_active_alerts()
     process_vllm_alerts_and_notify(alerts)
-    
+
 if __name__ == "__main__":
     main()
+    #generate_test()

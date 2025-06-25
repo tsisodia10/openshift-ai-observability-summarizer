@@ -2,7 +2,7 @@ apiVersion: monitoring.coreos.com/v1
 kind: PrometheusRule
 metadata:
   name: vllm-metric-alerts
-  namespace: vllm-alerts
+  namespace: m3
   labels:
     openshift.io/user-monitoring: "true" 
     openshift.io/prometheus-rule-evaluation-scope: "leaf-prometheus"
@@ -20,6 +20,10 @@ spec:
       labels:
         severity: info
         test_alert: "true"
+        expr: |
+          # This will fire for every instance of vllm:request_success_total that exists
+          rate(vllm:request_success_total[1m]) >= 0
+        for: 0s 
       annotations:
         summary: "DUMMY ALERT: Information about vLLM service {{ $labels.service }} in namespace {{ $labels.namespace }}"
         description: |
@@ -35,6 +39,10 @@ spec:
       for: 0s 
       labels:
         severity: info
+        test_alert: "true"
+        expr: |
+          vector(1)
+        for: 0s 
       annotations:
         summary: "DUMMY ALERT: This alert is always firing for testing purposes."
         description: |
@@ -53,6 +61,9 @@ spec:
       for: 5m
       labels:
         severity: critical
+        expr: |
+          rate(vllm:num_aborted_requests[5m]) / rate(vllm:num_total_requests[5m]) > 0.10 and rate(vllm:num_total_requests[5m]) > 0
+        for: 5m
       annotations:
         summary: "High rate of aborted requests for vLLM service {{ $labels.service }} in namespace {{ $labels.namespace }}"
         description: | 
@@ -67,6 +78,9 @@ spec:
       for: 5m
       labels:
         severity: critical
+        expr: |
+          histogram_quantile(0.95, sum by (instance, job, namespace, service, model_name, pod, le) (rate(vllm:e2e_request_latency_seconds_bucket[5m]))) > 5
+        for: 5m
       annotations:
         summary: "High P95 end-to-end request latency for vLLM service {{ $labels.service }} in namespace {{ $labels.namespace }}"
         description: |
@@ -81,6 +95,9 @@ spec:
       for: 5m
       labels:
         severity: critical
+        expr: |
+          (sum by (instance, job, namespace, service, model_name, pod) (rate(vllm:request_success_total[5m]))) / (sum by (instance, job, namespace, service, model_name, pod) (rate(vllm:num_total_requests[5m]))) < 0.95 and (sum by (instance, job, namespace, service, model_name, pod) (rate(vllm:num_total_requests[5m]))) > 0
+        for: 5m
       annotations:
         summary: "Low request success rate for vLLM service {{ $labels.service }} in namespace {{ $labels.namespace }}"
         description: |
@@ -95,6 +112,9 @@ spec:
       for: 5m
       labels:
         severity: warning
+        expr: |
+          rate(vllm:request_inference_time_seconds_sum[5m]) / rate(vllm:request_inference_time_seconds_count[5m]) > 2
+        for: 5m
       annotations:
         summary: "High average inference time for vLLM service {{ $labels.service }} in namespace {{ $labels.namespace }}"
         description: |
@@ -109,6 +129,9 @@ spec:
       for: 5m
       labels:
         severity: warning
+        expr: |
+          histogram_quantile(0.95, sum by (instance, job, namespace, service, model_name, pod, le) (rate(vllm:request_queue_time_seconds_bucket[5m]))) > 1
+        for: 5m
       annotations:
         summary: "High P95 request queue time for vLLM service {{ $labels.service }} in namespace {{ $labels.namespace }}"
         description: |
@@ -123,6 +146,9 @@ spec:
       for: 10m
       labels:
         severity: warning
+        expr: |
+          vllm:gpu_cache_usage_perc > 0.9
+        for: 10m
       annotations:
         summary: "High GPU cache usage for vLLM service {{ $labels.service }} in namespace {{ $labels.namespace }}"
         description: |

@@ -4,6 +4,6 @@ WORKDIR /app
 
 COPY . .
 
-RUN pip install requests
+RUN pip install requests llama-stack
 
 CMD ["python3", "alert_receiver.py"]
