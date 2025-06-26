@@ -164,11 +164,8 @@ def generate_test():
     print(desc)
 
 def main():
-    if SLACK_WEBHOOK_URL == "":
-        print("No Slack URL provided.")
-    else:
-        alerts = get_active_alerts()
-        process_vllm_alerts_and_notify(alerts)
+    alerts = get_active_alerts()
+    process_vllm_alerts_and_notify(alerts)
 
 if __name__ == "__main__":
     main()
