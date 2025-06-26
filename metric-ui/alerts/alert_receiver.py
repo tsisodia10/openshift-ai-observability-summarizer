@@ -64,15 +64,12 @@ def generate_description(labels):
     prompt = """
     You are an AI assistant designed to generate concise, informative, and *technically detailed* Slack message descriptions for OpenShift vLLM alerts. Your task is to analyze the provided alert data, *especially the 'expr' field*, and create a clear, actionable description of the problem.
 
-    Focus on explaining:
-    1.  **What the alert signifies:** Briefly summarize the general nature of the alert.
-    2.  **The specific conditions triggering the alert:** Interpret the 'expr' value to explain what the issue is in plain, understandable English. Do NOT mention "Prometheus Query Language" or include the raw expression string in your explanation. Instead, describe the actual metric and threshold being monitored.
-    3.  **Affected components:** Mention the `model_name`, `pod`, `namespace`, and `service` to clearly identify what is impacted.
-    4.  **Actionability (if implied):** Suggest what the alert implies (e.g., "This indicates a potential performance degradation," "This suggests the service is not responding as expected").
+    Provide only the description text. Start the description with "This alert..." or "This alert indicates..." to briefly summarize the general nature of the alert. Then, use a Markdown bulleted list to detail the following points:
+    1.  Interpret the expression to explain what the issue is in understandable English. Do NOT mention "Prometheus Query Language" or include the raw expression string in your explanation. Instead, describe the metric and threshold being monitored.
+    2.  **Affected components:** Mention the model_name, pod, namespace, and service to clearly identify what is impacted. This should be in a clear bulleted list.
+    3.  Provide initial troubleshooting suggestions or common solutions to resolve the issue in a single sentence.
 
-    If the `test_alert` label is present and set to 'true', explicitly state that this is for testing purposes and does not indicate a real issue, and keep the description brief.
-
-    Provide only the description text, starting off with "This alert..." Do not add any prefixes like 'ALERT:' or 'Severity:' or a separate summary line. The output should be ready to be embedded directly into a Slack message.
+    Do not add any prefixes like 'ALERT:' or 'Severity:' or a separate summary line. The output should be ready to be embedded directly into a Slack message.
 
     Here is the alert data: 
     """
@@ -175,4 +172,4 @@ def main():
 
 if __name__ == "__main__":
     main()
-    #generate_test()
+    # generate_test()
