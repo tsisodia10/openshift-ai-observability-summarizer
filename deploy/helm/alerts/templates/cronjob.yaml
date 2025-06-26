@@ -18,10 +18,10 @@ spec:
               image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
               imagePullPolicy: {{ .Values.image.pullPolicy }}
               env:
-                {{- range .Values.env }}
-                - name: {{ .name | quote }}
-                  value: {{ .value | quote }}
-                {{- end }}
+                - name: TIME_WINDOW
+                  value: "{{ .Values.config.timeWindow }}"
+                - name: ALERTMANAGER_URL
+                  value: "{{ .Values.config.alertmanagerUrl }}"
                 - name: LLAMA_STACK_URL
                   value: "http://llamastack.{{ .Release.Namespace }}.svc.cluster.local:8321"
                 - name: SLACK_WEBHOOK_URL
@@ -29,3 +29,26 @@ spec:
                     secretKeyRef:
                       name: {{ .Values.slackWebhook.secretName | quote }}
                       key: {{ .Values.slackWebhook.secretKey | quote }}
+                - name: AUTH_TOKEN
+                  valueFrom:
+                    secretKeyRef:
+                      name: {{ .Values.serviceAccountName }}
+                      key: token
+              volumeMounts:
+              - name: auth-token
+                mountPath: /var/run/secrets/kubernetes.io/serviceaccount
+                readOnly: true
+              - name: trusted-ca
+                mountPath: /etc/pki/ca-trust/extracted/pem
+                readOnly: true
+          volumes:
+            - name: auth-token
+              secret:
+                secretName: {{ .Values.serviceAccountName }}
+                defaultMode: 0440
+            - name: trusted-ca
+              configMap:
+                name: trusted-ca-bundle-alerts
+                items:
+                  - key: service-ca.crt
+                    path: ca-bundle.crt

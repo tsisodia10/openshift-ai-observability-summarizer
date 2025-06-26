@@ -1,23 +1,21 @@
 image:
   repository: quay.io/rh-ee-pezhao/appeng/vllm-alert-receiver
-  tag: 0.1.1
+  tag: 0.1.4
   pullPolicy: Always
 
 schedule: "*/1 * * * *" # cron job scheduled every minute
-
-env:
-  - name: ALERTMANAGER_URL
-    value: "http://alertmanager-operated.openshift-user-workload-monitoring.svc.cluster.local:9093"
-  - name: TIME_WINDOW
-    value: 60 # Notify on alerts less than 60 seconds old
 
 slackWebhook:
   secretName: alerts-secrets
   secretKey: slack-webhook-url
 
-serviceAccountName: default
+serviceAccountName: alert-receiver
 
 prometheusRule:
   name: vllm-metric-alerts
   labels:
     role: alert-rules 
+
+config:
+  alertmanagerUrl: "https://alertmanager-user-workload.openshift-user-workload-monitoring.svc.cluster.local:9095"
+  timeWindow: 60

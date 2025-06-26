@@ -10,21 +10,40 @@ SLACK_WEBHOOK_URL = os.getenv("SLACK_WEBHOOK_URL", "")
 LLAMA_STACK_URL = os.getenv("LLAMA_STACK_URL", "http://localhost:8321")
 TIME_WINDOW = int(os.getenv("TIME_WINDOW", 60))
 
+# Handle token input from volume or literal
+token_input = os.getenv("AUTH_TOKEN", "/var/run/secrets/kubernetes.io/serviceaccount/token")
+if os.path.exists(token_input):
+    with open(token_input, "r") as f:
+        AUTH_TOKEN = f.read().strip()
+else:
+    AUTH_TOKEN = token_input
+
+# CA bundle location (mounted via ConfigMap)
+CA_BUNDLE_PATH = "/etc/pki/ca-trust/extracted/pem/ca-bundle.crt"
+verify = CA_BUNDLE_PATH if os.path.exists(CA_BUNDLE_PATH) else True
+
 # --- LLAMASTACK SETUP ---
 client = LlamaStackClient(base_url=LLAMA_STACK_URL)
 llm = next(m for m in client.models.list() if m.model_type == "llm")
 
 # pull active alerts from Alertmanager
-def get_active_alerts():
+def get_active_alerts() -> dict:
+    headers = {"Authorization": f"Bearer {AUTH_TOKEN}"}
     endpoint = f"{ALERTMANAGER_URL}/api/v2/alerts"
+    verify = CA_BUNDLE_PATH if os.path.exists(CA_BUNDLE_PATH) else True
     try:
-        response = requests.get(endpoint)
+        response = requests.get(
+            endpoint,
+            headers=headers,
+            verify=verify,
+        )
         response.raise_for_status()  
+        print("Alerts successfully retrieved from Alertmanager")
         return response.json()
     except requests.exceptions.RequestException as e:
         print(f"Error querying Alertmanager: {e}")
         return None
-    
+
 def send_slack_message(payload):
     headers = {"Content-Type": "application/json"}
     if SLACK_WEBHOOK_URL == "":
@@ -77,6 +96,7 @@ def format_slack_message(alert_data):
 
     description = generate_description(alert_data['labels'])
 
+    # get firing start time in UTC
     starts_at_iso = alert_data.get('startsAt')
     starts_at_formatted = "N/A"
     if starts_at_iso:
@@ -114,6 +134,7 @@ def process_vllm_alerts_and_notify(alerts, time_window=TIME_WINDOW):
         now_utc = datetime.datetime.now(datetime.timezone.utc) 
         time_threshold = now_utc - datetime.timedelta(seconds=time_window)
 
+        found = False
         for alert in alerts:
             alertname = alert['labels'].get('alertname', '')
             starts_at_iso = alert.get('startsAt')
@@ -130,10 +151,15 @@ def process_vllm_alerts_and_notify(alerts, time_window=TIME_WINDOW):
                             print(f"\n--- Found NEW relevant VLLM Alert: {alertname} ---")
                             slack_payload = format_slack_message(alert)
                             send_slack_message(slack_payload)
+                            found = True
                         else:
                             print(f"VLLM alert '{alertname}' is active but started too long ago ({alert_start_time_utc}). Skipping.")
                     except ValueError:
                         print(f"Warning: Could not parse startsAt time for alert '{alertname}': {starts_at_iso}")
+        if not found:
+            print("No new alerts found")
+    else:
+        print("No alerts to process")
 
 def generate_test():
     alert = json.loads('{"alertname": "VLLMHighAverageInferenceTime", "container": "kserve-container", "endpoint": "vllm-serving-runtime-metrics", "engine": "0", "expr": "rate(vllm:request_inference_time_seconds_sum[5m]) / rate(vllm:request_inference_time_seconds_count[5m]) > 2", "for": "5m", "instance": "10.129.2.73:8080", "job": "llama-3-2-3b-instruct-metrics", "model_name": "meta-llama/Llama-3.2-3B-Instruct", "namespace": "m3", "pod": "llama-3-2-3b-instruct-predictor-9fd74489-c6dwt", "prometheus": "openshift-user-workload-monitoring/user-workload", "service": "llama-3-2-3b-instruct-metrics", "severity": "warning"}')
@@ -141,8 +167,11 @@ def generate_test():
     print(desc)
 
 def main():
-    alerts = get_active_alerts()
-    process_vllm_alerts_and_notify(alerts)
+    if SLACK_WEBHOOK_URL == "":
+        print("No Slack URL provided.")
+    else:
+        alerts = get_active_alerts()
+        process_vllm_alerts_and_notify(alerts)
 
 if __name__ == "__main__":
     main()
