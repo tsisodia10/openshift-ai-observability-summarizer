@@ -85,6 +85,9 @@ def model_requires_api_key(model_id, model_config):
     model_info = model_config.get(model_id, {})
     return model_info.get("requiresApiKey", False)
 
+def model_costs(model_id, model_config):
+    model_info = model_config.get(model_id, {})
+    return model_info.get("cost", None)
 
 def clear_session_state():
     """Clear session state on errors"""
@@ -147,7 +150,7 @@ multi_model_name = st.sidebar.selectbox(
 # --- Define model key requirements ---
 model_config = get_model_config()
 current_model_requires_api_key = model_requires_api_key(multi_model_name, model_config)
-
+current_model_cost = model_costs(multi_model_name, model_config)
 
 # --- API Key Input ---
 api_key = st.sidebar.text_input(
@@ -281,6 +284,23 @@ if page == "📊 Metric Summarizer":
                 st.line_chart(chart_df)
             else:
                 st.info("No data available to generate chart.")
+
+            if current_model_cost:
+                st.markdown("### 💸 Estimated Cost")
+                try:
+                    prompt_tokens = sum(p["value"] for p in metric_data.get("Prompt Tokens Created", []))
+                    output_tokens = sum(p["value"] for p in metric_data.get("Output Tokens Created", []))
+
+                    cost_prompt = prompt_tokens * current_model_cost["prompt_rate"]
+                    cost_output = output_tokens * current_model_cost["output_rate"]
+
+                    total_cost = cost_prompt + cost_output
+
+                    st.metric("Total Estimated Cost", f"${total_cost:.4f}")
+                    st.write(f"📨 Prompt Tokens: {prompt_tokens:.0f} → ${cost_prompt:.4f}")
+                    st.write(f"📝 Output Tokens: {output_tokens:.0f} → ${cost_output:.4f}")
+                except Exception as e:
+                    st.error(f"Could not estimate cost: {e}")
 
 # --- 🤖 Chat with Prometheus Page ---
 elif page == "🤖 Chat with Prometheus":
