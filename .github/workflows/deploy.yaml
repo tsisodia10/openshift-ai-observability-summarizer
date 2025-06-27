@@ -23,11 +23,10 @@ jobs:
         run: |
           oc login ${{ secrets.OPENSHIFT_SERVER }} --token=${{ secrets.OPENSHIFT_SECRET }}
 
-      - name: Deploy using Makefile
+      - name: Deploy metrics-summarizer with Makefile
         env:
           HF_TOKEN: ${{ secrets.HUGGINGFACE_API_KEY }}
+          NAMESPACE: metrics-summarizer
         run: |
           cd deploy/helm
-          make install NAMESPACE=metrics-summarizer
-
-
+          make install
