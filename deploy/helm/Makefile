@@ -100,13 +100,20 @@ help:
 
 # Create namespace and deploy
 namespace:
-	@oc create namespace $(NAMESPACE) &> /dev/null && oc label namespace $(NAMESPACE) modelmesh-enabled=false ||:
-	@oc project $(NAMESPACE) &> /dev/null ||:
+	@if oc get namespace $(NAMESPACE) > /dev/null 2>&1; then \
+		echo "✅ Namespace $(NAMESPACE) exists."; \
+	else \
+		echo "❌ Namespace $(NAMESPACE) not found. Please create it manually."; \
+		exit 1; \
+	fi
+	@oc project $(NAMESPACE) > /dev/null
+
 
 .PHONY: depend
 depend:
-	@echo "Updating Helm dependencies"
-	@helm dependency update $(RAG_CHART) &> /dev/null
+	@echo "Updating Helm dependencies..."
+	@helm dependency update $(RAG_CHART) || exit 1
+
 
 .PHONY: list-models
 list-models: depend
@@ -136,10 +143,11 @@ install-rag: namespace
 	@$(eval LLAMA_STACK_ARGS := $(call helm_llama_stack_args))
 	@$(eval PGVECTOR_ARGS := $(call helm_pgvector_args))
 	@echo "Installing $(RAG_CHART) helm chart"
-	@helm -n $(NAMESPACE) upgrade --install $(RAG_CHART) $(RAG_CHART) -n $(NAMESPACE) \
-		$(LLM_SERVICE_ARGS) \
-		$(LLAMA_STACK_ARGS) \
-		$(PGVECTOR_ARGS)
+	@helm -n $(NAMESPACE) upgrade --install $(RAG_CHART) $(RAG_CHART) \
+	--atomic --timeout 10m \
+	$(LLM_SERVICE_ARGS) \
+	$(LLAMA_STACK_ARGS) \
+	$(PGVECTOR_ARGS)
 	@echo "Waiting for model services to deploy. It will take around 10-15 minutes depending on the size of the model..."
 	@oc wait -n $(NAMESPACE) --for=condition=Ready --timeout=60m inferenceservice --all ||:
 	@echo "$(RAG_CHART) installed successfully"
