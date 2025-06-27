@@ -27,6 +27,7 @@ jobs:
         env:
           HF_TOKEN: ${{ secrets.HUGGINGFACE_API_KEY }}
         run: |
+          cd deploy/helm
           make install NAMESPACE=metrics-summarizer
 
 
