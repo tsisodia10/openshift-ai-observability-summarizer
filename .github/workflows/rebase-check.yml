@@ -8,4 +8,4 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Check if PR is up to date (dummy step)
-        run: echo "Passed: PR is up to date"
+        run: echo "Passed - PR is up to date"
