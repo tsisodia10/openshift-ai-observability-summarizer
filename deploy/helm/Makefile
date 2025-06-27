@@ -127,10 +127,21 @@ install-metric-mcp: namespace
 		LLM_URL=$$(oc get inferenceservice $$model -n $(NAMESPACE) -o jsonpath='{.status.url}'); \
 		echo "Detected LLM_URL for $$model: $$LLM_URL"; \
 	done
-	helm upgrade --install $(METRIC_MCP_RELEASE_NAME) $(METRIC_MCP_CHART_PATH) \
-		-n $(NAMESPACE) \
-		--set-json listModels.modelId.enabledModelIds='$(INTERNAL_MODELS_JSON)' \
-		--set-json modelConfig='$(MODEL_CONFIG_JSON)'
+
+	@echo "Checking ClusterRole grafana-prometheus-reader..."
+	@if oc get clusterrole grafana-prometheus-reader > /dev/null 2>&1; then \
+		echo "ClusterRole exists. Deploying without creating Grafana role..."; \
+		helm upgrade --install $(METRIC_MCP_RELEASE_NAME) $(METRIC_MCP_CHART_PATH) -n $(NAMESPACE) \
+			--set rbac.createGrafanaRole=false \
+			--set-json listModels.modelId.enabledModelIds='$(INTERNAL_MODELS_JSON)' \
+			--set-json modelConfig='$(MODEL_CONFIG_JSON)'; \
+	else \
+		echo "ClusterRole does not exist. Deploying and creating Grafana role..."; \
+		helm upgrade --install $(METRIC_MCP_RELEASE_NAME) $(METRIC_MCP_CHART_PATH) -n $(NAMESPACE) \
+			--set rbac.createGrafanaRole=true \
+			--set-json listModels.modelId.enabledModelIds='$(INTERNAL_MODELS_JSON)' \
+			--set-json modelConfig='$(MODEL_CONFIG_JSON)'; \
+	fi
 
 .PHONY: install-metric-ui
 install-metric-ui: namespace
