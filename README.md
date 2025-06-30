@@ -108,20 +108,11 @@ make uninstall NAMESPACE=metric-summarizer
 Additionally, you can set up alerts for your vLLM models and be notified when they triggered via Slack.
 
 #### Prerequisites
-- [Alertmanager instance enabled for user-defined alert routing](https://docs.redhat.com/en/documentation/openshift_container_platform/4.11/html/monitoring/enabling-alert-routing-for-user-defined-projects#enabling-the-platform-alertmanager-instance-for-user-defined-alert-routing_enabling-alert-routing-for-user-defined-projects)
-- [Enable cross-project alerting for your namespace](https://docs.redhat.com/en/documentation/openshift_container_platform/4.18/html-single/monitoring/index#creating-cross-project-alerting-rules-for-user-defined-projects_managing-alerts-as-an-administrator)
+[Create a Slack Webhook Url to your desired channel](https://api.slack.com/messaging/webhooks)
 
 #### Installation
-1. Create a secret containing your Slack webhook URL:
-```
-oc create secret generic alerts-secrets \
-		--from-literal=slack-webhook-url='<SLACK_WEBHOOK_URL>' \
-		--namespace <NAMESPACE> \
-		--dry-run=client -o yaml | oc apply -f -
-```
-2. Install the `alerting` Helm chart:
-```
-helm install alerting ./deploy/helm/alerting --namespace <NAMESPACE>
+```bash
+make install-alerts NAMESPACE=$NAMESPACE
 ```
 This will apply a set of alerts to monitor as well as deploy a cron job to route alerts from the Alertmanager to Slack.
 

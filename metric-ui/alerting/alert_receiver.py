@@ -27,7 +27,7 @@ client = LlamaStackClient(base_url=LLAMA_STACK_URL)
 llm = next(m for m in client.models.list() if m.model_type == "llm")
 
 # pull active alerts from Alertmanager
-def get_active_alerts() -> dict:
+def get_active_alerts():
     headers = {"Authorization": f"Bearer {AUTH_TOKEN}"}
     endpoint = f"{ALERTMANAGER_URL}/api/v2/alerts"
     verify = CA_BUNDLE_PATH if os.path.exists(CA_BUNDLE_PATH) else True

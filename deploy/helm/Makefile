@@ -49,6 +49,9 @@ S3_TEMPLATE={"access_key_id":"$(1)","secret_access_key":"$(2)","bucket_name":"$(
 # CUSTOM_INGESTION_PIPELINE_VALUES = ~/my-values.yaml
 # CUSTOM_INGESTION_PIPELINE_NAME ?= my-pipeline
 
+# Alerting configuration
+SLACK_WEBHOOK_URL ?= $(shell bash -c 'read -r -p "Enter SLACK_WEBHOOK_URL: " SLACK_URL; echo $$SLACK_URL')
+ALERTING_RELEASE_NAME ?= alerting
 
 helm_llm_service_args = \
     --set llm-service.secret.hf_token=$(HF_TOKEN) \
@@ -84,6 +87,10 @@ help:
 	@echo "  install-ingestion-pipeline - Install extra ingestion pipelines (must be on the same namespace as the RAG deployment)"
 	@echo "  uninstall     - Uninstall the RAG deployment and clean up resources"
 	@echo "  status        - Check status of the deployment"
+	@echo "  patch-config  - Enable Alertmanager and configure cross-project alerting"
+	@echo "  create-secret - Create/update Kubernetes Secret with Slack Webhook URL"
+	@echo "  install-alerts - Install alerting Helm chart"
+	@echo "  uninstall-alerts - Uninstall alerting Helm chart and clean up secrets"
 	@echo ""
 	@echo "Configuration options (set via environment variables or make arguments):"
 	@echo "  NAMESPACE                - Target namespace (default: llama-stack-rag)"
@@ -186,6 +193,66 @@ uninstall:
 .PHONY: install-ingestion-pipeline
 install-ingestion-pipeline:
 	helm -n $(NAMESPACE) install $(CUSTOM_INGESTION_PIPELINE_NAME) rag/charts/ingestion-pipeline-0.1.0.tgz -f $(CUSTOM_INGESTION_PIPELINE_VALUES)
+
+# -- Alerting targets --
+
+# Enable Alertmanager and add namespace to namespacesWithoutLabelEnforcement, patches the user-workload-monitoring ConfigMap
+.PHONY: patch-config
+patch-config: namespace
+	@echo "Patching user-workload-monitoring-config ConfigMap..."
+	@CURRENT_CONFIG=$$(oc get configmap user-workload-monitoring-config \
+		-n openshift-user-workload-monitoring \
+		-o jsonpath='{.data.config\.yaml}'); \
+	if [ -z "$$CURRENT_CONFIG" ]; then \
+		CURRENT_CONFIG="{}"; \
+	fi; \
+	EXISTING_NAMESPACES=$$(echo "$$CURRENT_CONFIG" | yq eval '.namespacesWithoutLabelEnforcement[]' - 2>/dev/null | paste -sd, -); \
+	if [ -n "$$EXISTING_NAMESPACES" ]; then \
+		if echo "$$EXISTING_NAMESPACES" | grep -q "$(NAMESPACE)"; then \
+			NAMESPACE_ARRAY="[\"$$(echo "$$EXISTING_NAMESPACES" | sed 's/,/", "/g')\"]"; \
+		else \
+			NAMESPACE_ARRAY="[\"$$(echo "$$EXISTING_NAMESPACES" | sed 's/,/", "/g')\", \"$(NAMESPACE)\"]"; \
+		fi; \
+	else \
+		NAMESPACE_ARRAY="[\"$(NAMESPACE)\"]"; \
+	fi; \
+	BASE_CONFIG=$$(echo "$$CURRENT_CONFIG" | \
+		yq eval '. as $$item ireduce ({}; . * $$item) | \
+		.alertmanager = (.alertmanager // {}) | \
+		.alertmanager.enabled = true | \
+		.alertmanager.enableAlertmanagerConfig = true | \
+		del(.namespacesWithoutLabelEnforcement)' -); \
+	NEW_CONFIG="$$BASE_CONFIG"$$'\n'"namespacesWithoutLabelEnforcement: $$NAMESPACE_ARRAY"; \
+	oc patch configmap user-workload-monitoring-config \
+		-n openshift-user-workload-monitoring \
+		--type merge \
+		-p "$$(echo '{"data":{"config.yaml":""}}' | jq --arg config "$$NEW_CONFIG" '.data."config.yaml" = $$config')"
+	@echo "ConfigMap patched successfully. Alertmanager enabled and cross-project alerting set up for namespace $(NAMESPACE)."
+
+# Request Slack URL from user and create/update a Kubernetes Secret
+.PHONY: create-secret
+create-secret: namespace
+	@echo "Creating/Updating 'alerts-secrets' with Slack Webhook URL in namespace $(NAMESPACE)..."
+	@oc create secret generic alerts-secrets \
+		--from-literal=slack-webhook-url='$(SLACK_WEBHOOK_URL)' \
+		--namespace $(NAMESPACE) \
+		--dry-run=client -o yaml | oc apply -f -
+	@echo "Secret 'alerts-secrets' created/updated in namespace $(NAMESPACE)."
+
+.PHONY: install-alerts
+install-alerts: namespace patch-config create-secret 
+	@echo "Installing/Upgrading Helm chart $(ALERTING_RELEASE_NAME) in namespace $(NAMESPACE)..."
+	helm upgrade --install $(ALERTING_RELEASE_NAME) ./alerting --namespace $(NAMESPACE)
+	@echo "Helm chart deployment complete."
+
+.PHONY: uninstall-alerts
+uninstall-alerts: namespace
+	@echo "Uninstalling Helm chart $(ALERTING_RELEASE_NAME)from namespace $(NAMESPACE)..."
+	helm uninstall $(ALERTING_RELEASE_NAME) --namespace $(NAMESPACE)
+	@echo "Helm chart uninstalled."
+	@echo "Deleting secret 'alerts-secrets' in namespace $(NAMESPACE)..."
+	oc delete secret alerts-secrets -n $(NAMESPACE) || true
+	@echo "Cleanup complete for namespace $(NAMESPACE). Note: user-workload-monitoring-config was not reverted."
 
 # Delete all jobs in the namespace
 .PHONY: delete-jobs
