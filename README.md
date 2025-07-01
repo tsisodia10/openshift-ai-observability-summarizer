@@ -63,7 +63,7 @@ If you want multiple model deployments -
 make install NAMESPACE=llama-stack-summarizer LLM=llama-3-2-3b-instruct LLM_TOLERATION="nvidia.com/gpu" SAFETY=llama-guard-3-8b SAFETY_TOLERATION="nvidia.com/gpu"
 ```
 
-To run and install the full environment, including the extended multi-model support -Add commentMore actions
+To run and install the full environment, including the extended multi-model support -
 
 ```bash
 make install NAMESPACE=$NAMESPACE
