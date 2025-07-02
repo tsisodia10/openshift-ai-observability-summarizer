@@ -1,5 +1,8 @@
 # AI Observability Metrics Summarizer
 
+<img src="docs/img/logo.png" alt="UI" style="width:800px; height:800px;"/>
+
+
 [Design Document](https://docs.google.com/document/d/1bXBCL4fbPlRqQxwhGX1p12CS_E6-9oOyFnYSpbQskyI/edit?usp=sharing)
 
 This application provides an interactive dashboard and chatbot interface to **analyze AI model performance metrics** collected from Prometheus and generate **human-like summaries using a Llama model** deployed on OpenShift AI.
