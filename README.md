@@ -1,6 +1,6 @@
 # AI Observability Metrics Summarizer
 
-<img src="docs/img/logo.png" alt="UI" style="width:800px; height:800px;"/>
+<img src="docs/img/logo.png" alt="UI" style="width:500px; height:500px;"/>
 
 
 [Design Document](https://docs.google.com/document/d/1bXBCL4fbPlRqQxwhGX1p12CS_E6-9oOyFnYSpbQskyI/edit?usp=sharing)
