@@ -221,17 +221,38 @@ To generate a report:
 
 ## Local Development via Port-Forwarding
 
-In order to develop locally faster on the MCP/UI you can leverage port-forwarding to Llamastack, llm-service and Thanos. `scripts/local-dev.sh` port-forwards these services and locally starts the mcp and ui servers for local testing and devlopment.
+In order to develop locally faster on the MCP/UI you can leverage port-forwarding to Llamastack, llm-service and Thanos by making use of `scripts/local-dev.sh` script.
 
-Pre-requisites: you have a deployment on the cluster already.
+**Pre-requisites**:
+1. You have a deployment on the cluster already.
+2. You are logged into the cluster and can execute `oc` commands against the cluster.
 
-1. Modify the `LLM_NAMESPACE` variable in `scripts/local-dev.sh` or export `LLM_NAMESPACE` as an environmental variable.
-2. Run the development script:
-```
-./scripts/local-dev.sh
-```
+### Running script
+To perform local setup using the `./scripts/local-dev.sh` script, execute the following steps:
+1. **Make sure you are logged into the cluster and can execute `oc` commands against the cluster.**
+1. Install `uv` by following instructions on the [uv website](https://github.com/astral-sh/uv)
+1. Sync up the environment using the following command:
+   * `uv sync`
 
-### Macos Weasyprint Install
+      The `uv sync` command performs the following tasks:
+
+      1. Find or download an appropriate Python version
+      1. Creates a virtual environment in `.venv` folder
+      1. Build complete dependency using `pyproject.toml` (and `uv.lock`) file(s)
+      1. Sync up project dependencies in the virtual environment
+1. Activate the virtual environment using the following command:
+   * `source .venv/bin/activate`
+1. Export the namespace where the kickstart is deployed by running the following command:
+   * `export LLM_NAMESPACE=<DESIRED_NAMESPACE>`
+1. Run the script by executing the following command:
+   * `./scripts/local-dev.sh`
+
+      This script should perform the tasks shown in the following image:
+![Command Output](docs/img/local-dev-expected.png)
+
+#### Macos weasyprint install
+
+**Still verifying whether we need this setup or not as weasyprint is installed using `uv` in previous step.**
 
 In order to run the mcp locally you'll need to install weasyprint:
 1. Install via brew `brew install weasyprint`
