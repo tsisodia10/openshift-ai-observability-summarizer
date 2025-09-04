@@ -1,11 +1,12 @@
-"""Observability tools for OpenShift AI monitoring and analysis.
+"""Observability tools for OpenShift AI monitoring and analysis (vLLM-focused).
 
-This module provides MCP tools for interacting with OpenShift AI observability data:
+This module provides MCP tools for interacting with observability data:
 - list_models: Get available AI models
 - list_namespaces: List monitored namespaces
 - get_model_config: Show configured LLM models for summarization
 - analyze_vllm: Analyze vLLM metrics and summarize using LLM
-- analyze_openshift: Analyze OpenShift metrics by category/scope using API logic
+
+OpenShift-specific tools live in observability_openshift_tools.py
 """
 
 import json
@@ -17,7 +18,7 @@ from core.metrics import get_models_helper, get_namespaces_helper, get_vllm_metr
 from core.llm_client import build_prompt, summarize_with_llm, extract_time_range_with_info
 from core.models import AnalyzeRequest
 from core.response_validator import ResponseType
-from core.metrics import analyze_openshift_metrics, NAMESPACE_SCOPED, CLUSTER_WIDE
+from core.metrics import NAMESPACE_SCOPED, CLUSTER_WIDE
 from core.config import PROMETHEUS_URL, THANOS_TOKEN, VERIFY_SSL
 import requests
 from datetime import datetime
@@ -32,27 +33,34 @@ def resolve_time_range(
     time_range: Optional[str] = None,
     start_datetime: Optional[str] = None,
     end_datetime: Optional[str] = None,
+    start_ts: Optional[int] = None,
+    end_ts: Optional[int] = None,
 ) -> tuple[int, int]:
     """Resolve various time inputs into start/end epoch seconds.
 
     Precedence:
-    1) time_range natural language → use extract_time_range_with_info
-    2) ISO datetime strings (start_datetime/end_datetime)
-    3) Default to last 1 hour
+    1) Explicit epoch timestamps (start_ts/end_ts)
+    2) time_range natural language → use extract_time_range_with_info
+    3) ISO datetime strings (start_datetime/end_datetime)
+    4) Default to last 1 hour
     """
     try:
-        # 1) Natural language time range
-        if time_range:
-            start_ts, end_ts, _info = extract_time_range_with_info(time_range, None, None)
-            return start_ts, end_ts
+        # 1) Explicit epoch timestamps if provided
+        if start_ts is not None and end_ts is not None:
+            return int(start_ts), int(end_ts)
 
-        # 2) ISO datetime strings
+        # 2) Natural language time range
+        if time_range:
+            start_ts2, end_ts2, _info = extract_time_range_with_info(time_range, None, None)
+            return start_ts2, end_ts2
+
+        # 3) ISO datetime strings
         if start_datetime and end_datetime:
             rs = int(datetime.fromisoformat(start_datetime.replace("Z", "+00:00")).timestamp())
             re = int(datetime.fromisoformat(end_datetime.replace("Z", "+00:00")).timestamp())
             return rs, re
 
-        # 3) Default: last 1 hour
+        # 4) Default: last 1 hour
         now = int(datetime.utcnow().timestamp())
         return now - 3600, now
     except Exception:
@@ -207,79 +215,4 @@ def analyze_vllm(
     except Exception as e:
         return _resp(f"Error during analysis: {str(e)}", is_error=True)
 
-def analyze_openshift(
-    metric_category: str,
-    scope: str = "cluster_wide",
-    namespace: Optional[str] = None,
-    time_range: Optional[str] = None,
-    start_datetime: Optional[str] = None,
-    end_datetime: Optional[str] = None,
-    summarize_model_id: Optional[str] = None,
-    api_key: Optional[str] = None,
-) -> List[Dict[str, Any]]:
-    """Analyze OpenShift metrics for a category and scope.
 
-    Args:
-        metric_category: Must be one of the defined categories below.
-
-            Cluster-wide categories (valid for scope="cluster_wide"):
-            - "Fleet Overview"
-            - "Services & Networking"
-            - "Jobs & Workloads"
-            - "Storage & Config"
-            - "Workloads & Pods"
-            - "GPU & Accelerators"
-            - "Storage & Networking"
-            - "Application Services"
-
-            Namespace-scoped categories (valid for scope="namespace_scoped"):
-            - "Fleet Overview"
-            - "Workloads & Pods"
-            - "Compute & Resources"
-            - "Storage & Networking"
-            - "Application Services"
-        scope: "cluster_wide" or "namespace_scoped"
-        namespace: required when scope == "namespace_scoped"
-        start_ts: unix epoch seconds (optional)
-        end_ts: unix epoch seconds (optional)
-        summarize_model_id: LLM model id to use for summary (optional)
-        api_key: API key for LLM provider (optional)
-
-    Returns:
-        A text block with the LLM summary and basic metadata.
-    """
-    try:
-        if scope not in (CLUSTER_WIDE, NAMESPACE_SCOPED):
-            return _resp("Invalid scope. Use 'cluster_wide' or 'namespace_scoped'.")
-        if scope == NAMESPACE_SCOPED and not namespace:
-            return _resp("Namespace is required when scope is 'namespace_scoped'.")
-
-        # Resolve time range uniformly (string inputs → epoch seconds)
-        start_ts, end_ts = resolve_time_range(
-            time_range=time_range,
-            start_datetime=start_datetime,
-            end_datetime=end_datetime,
-        )
-
-        result = analyze_openshift_metrics(
-            metric_category=metric_category,
-            scope=scope,
-            namespace=namespace or "",
-            start_ts=start_ts,
-            end_ts=end_ts,
-            summarize_model_id=summarize_model_id or os.getenv("DEFAULT_SUMMARIZE_MODEL", ""),
-            api_key=api_key or os.getenv("LLM_API_TOKEN", ""),
-        )
-
-        # Format the response for MCP consumers
-        summary = result.get("llm_summary", "")
-        scope_desc = result.get("scope", scope)
-        ns_desc = result.get("namespace", namespace or "")
-        header = f"OpenShift Analysis ({metric_category}) — {scope_desc}"
-        if scope == NAMESPACE_SCOPED and ns_desc:
-            header += f" (namespace={ns_desc})"
-
-        content = f"{header}\n\n{summary}".strip()
-        return _resp(content)
-    except Exception as e:
-        return _resp(f"Error running analyze_openshift: {str(e)}", is_error=True)
