@@ -3,3 +3,4 @@ requests
 pandas
 matplotlib
 fastmcp
+anthropic>=0.7.0

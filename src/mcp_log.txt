@@ -1,0 +1,12 @@
+{"event": "Started server process [96925]", "level": "info", "timestamp": "2025-09-08T22:14:33.251054Z"}
+{"event": "Waiting for application startup.", "level": "info", "timestamp": "2025-09-08T22:14:33.251123Z"}
+{"event": "StreamableHTTP session manager started", "level": "info", "timestamp": "2025-09-08T22:14:33.252540Z"}
+{"event": "Application startup complete.", "level": "info", "timestamp": "2025-09-08T22:14:33.252598Z"}
+{"event": "Uvicorn running on http://0.0.0.0:8085 (Press CTRL+C to quit)", "level": "info", "timestamp": "2025-09-08T22:14:33.252836Z"}
+{"event": "127.0.0.1:54768 - \"GET /health HTTP/1.1\" 200", "level": "info", "timestamp": "2025-09-08T22:14:35.631316Z"}
+{"event": "Shutting down", "level": "info", "timestamp": "2025-09-08T22:14:54.589196Z"}
+{"event": "Waiting for application shutdown.", "level": "info", "timestamp": "2025-09-08T22:14:54.690550Z"}
+{"event": "StreamableHTTP session manager shutting down", "level": "info", "timestamp": "2025-09-08T22:14:54.690721Z"}
+{"event": "Application shutdown complete.", "level": "info", "timestamp": "2025-09-08T22:14:54.690870Z"}
+{"event": "Finished server process [96925]", "level": "info", "timestamp": "2025-09-08T22:14:54.690914Z"}
+{"event": "{\"event\": \"Observability MCP server shutting down\", \"logger\": \"__main__\", \"level\": \"info\", \"timestamp\": \"2025-09-08T22:14:54.691165Z\"}", "level": "info", "timestamp": "2025-09-08T22:14:54.691203Z"}

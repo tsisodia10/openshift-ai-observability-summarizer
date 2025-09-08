@@ -1,7 +1,13 @@
 import logging
 
-from .settings import settings
-from mcp_server.utils.pylogger import get_python_logger, force_reconfigure_all_loggers
+try:
+    from .settings import settings
+except ImportError:
+    from settings import settings
+try:
+    from mcp_server.utils.pylogger import get_python_logger, force_reconfigure_all_loggers
+except ImportError:
+    from utils.pylogger import get_python_logger, force_reconfigure_all_loggers
 
 
 class ObservabilityMCPServer:
@@ -30,7 +36,17 @@ class ObservabilityMCPServer:
             list_openshift_metric_groups,
             list_openshift_namespace_metric_groups,
         )
+        from .tools.prometheus_tools import (
+            search_metrics,
+            get_metric_metadata,
+            get_label_values,
+            execute_promql,
+            explain_results,
+            suggest_queries,
+            select_best_metric,
+        )
 
+        # Existing tools
         self.mcp.tool()(list_models)
         self.mcp.tool()(list_namespaces)
         self.mcp.tool()(get_model_config)
@@ -40,4 +56,13 @@ class ObservabilityMCPServer:
         self.mcp.tool()(analyze_openshift)
         self.mcp.tool()(list_openshift_metric_groups)
         self.mcp.tool()(list_openshift_namespace_metric_groups)
+        
+        # New Pure Prometheus tools
+        self.mcp.tool()(search_metrics)
+        self.mcp.tool()(get_metric_metadata)
+        self.mcp.tool()(get_label_values)
+        self.mcp.tool()(execute_promql)
+        self.mcp.tool()(explain_results)
+        self.mcp.tool()(suggest_queries)
+        self.mcp.tool()(select_best_metric)
 
