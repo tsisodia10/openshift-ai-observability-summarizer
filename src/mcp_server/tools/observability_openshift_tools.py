@@ -1,14 +1,15 @@
 from typing import Dict, Any, List, Optional
 import os
+import json
+import core.metrics as core_metrics
 
 from .observability_vllm_tools import _resp, resolve_time_range
 from core.metrics import (
     analyze_openshift_metrics,
+    chat_openshift_metrics,
     NAMESPACE_SCOPED,
     CLUSTER_WIDE,
-    get_openshift_metrics,
 )
-
 
 def analyze_openshift(
     metric_category: str,
@@ -64,7 +65,7 @@ def analyze_openshift(
 def list_openshift_metric_groups() -> List[Dict[str, Any]]:
     """Return OpenShift metric group categories (cluster-wide)."""
     try:
-        groups = list(get_openshift_metrics().keys())
+        groups = list(core_metrics.get_openshift_metrics().keys())
         header = "Available OpenShift Metric Groups (cluster-wide):\n\n"
         body = "\n".join([f"• {g}" for g in groups])
         return _resp(header + body if groups else "No OpenShift metric groups available.")
@@ -88,5 +89,58 @@ def list_openshift_namespace_metric_groups() -> List[Dict[str, Any]]:
             f"Error retrieving OpenShift namespace metric groups: {str(e)}",
             is_error=True,
         )
+
+def chat_openshift(
+    metric_category: str,
+    question: str,
+    scope: str = "cluster_wide",
+    namespace: Optional[str] = None,
+    time_range: Optional[str] = None,
+    start_datetime: Optional[str] = None,
+    end_datetime: Optional[str] = None,
+    summarize_model_id: Optional[str] = None,
+    api_key: Optional[str] = None,
+) -> List[Dict[str, Any]]:
+    """Chat about OpenShift metrics for a specific category/scope.
+
+    Returns a text block including PromQL (if provided) and the LLM summary.
+    """
+    try:
+        # Validate inputs
+        if scope not in (CLUSTER_WIDE, NAMESPACE_SCOPED):
+            return _resp("Invalid scope. Use 'cluster_wide' or 'namespace_scoped'.")
+        if scope == NAMESPACE_SCOPED and not namespace:
+            return _resp("Namespace is required when scope is 'namespace_scoped'.")
+
+        # Resolve time range (supports epoch or strings)
+        start_ts_resolved, end_ts_resolved = resolve_time_range(
+            time_range=time_range,
+            start_datetime=start_datetime,
+            end_datetime=end_datetime,
+        )
+
+        # Delegate to core logic
+        result = chat_openshift_metrics(
+            metric_category=metric_category,
+            question=question,
+            scope=scope,
+            namespace=namespace or "",
+            start_ts=start_ts_resolved,
+            end_ts=end_ts_resolved,
+            summarize_model_id=summarize_model_id or "",
+            api_key=api_key or "",
+        )
+        payload = {
+            "metric_category": metric_category,
+            "scope": scope,
+            "namespace": namespace or "",
+            "start_ts": start_ts_resolved,
+            "end_ts": end_ts_resolved,
+            "promql": result.get("promql", ""),
+            "summary": result.get("summary", ""),
+        }
+        return _resp(json.dumps(payload))
+    except Exception as e:
+        return _resp(f"Error in chat_openshift: {str(e)}", is_error=True)
 
 
