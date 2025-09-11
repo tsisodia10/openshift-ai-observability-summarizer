@@ -3,7 +3,7 @@
 
 # NAMESPACE validation for deployment targets
 ifeq ($(NAMESPACE),)
-ifeq (,$(filter install-local depend install-ingestion-pipeline list-models% generate-model-config help build build-metrics-api build-ui build-alerting build-mcp-server push push-metrics-api push-ui push-alerting push-mcp-server install-observability uninstall-observability clean config test,$(MAKECMDGOALS)))
+ifeq (,$(filter install-local depend install-ingestion-pipeline list-models% generate-model-config help build build-metrics-api build-ui build-alerting build-mcp-server push push-metrics-api push-ui push-alerting push-mcp-server install-observability-stack uninstall-observability-stack clean config test,$(MAKECMDGOALS)))
 $(error NAMESPACE is not set)
 endif
 endif
@@ -40,6 +40,13 @@ endif
 POSTGRES_USER ?= postgres
 POSTGRES_PASSWORD ?= rag_password
 POSTGRES_DBNAME ?= rag_blueprint
+# MinIO configuration for observability storage (traces, logs, metrics)
+MINIO_USER ?= admin
+MINIO_PASSWORD ?= minio123
+MINIO_HOST ?= minio
+MINIO_PORT ?= 9000
+# MinIO bucket configuration (comma-separated list)
+MINIO_BUCKETS ?= tempo,loki
 
 # HF_TOKEN is only required if LLM_URL is not set
 HF_TOKEN ?= $(shell \
@@ -51,6 +58,8 @@ HF_TOKEN ?= $(shell \
 )
 
 RAG_CHART := rag
+MINIO_CHART := minio-observability-storage
+MINIO_CHART_PATH := minio
 METRICS_API_RELEASE_NAME ?= metrics-api
 METRICS_API_CHART_PATH ?= metrics-api
 METRICS_UI_RELEASE_NAME ?= ui
@@ -78,6 +87,7 @@ ALERTING_RELEASE_NAME ?= alerting
 # Observability configuration
 OBSERVABILITY_NAMESPACE ?= observability-hub # currently hard-coded in instrumentation.yaml
 INSTRUMENTATION_PATH ?= observability/otel-collector/scripts/instrumentation.yaml
+MINIO_NAMESPACE ?= observability-hub
 
 # LLM URL processing constants
 DEFAULT_LLM_PORT_AND_PATH := :8080/v1
@@ -119,6 +129,18 @@ helm_pgvector_args = \
     --set pgvector.secret.password=$(POSTGRES_PASSWORD) \
     --set pgvector.secret.dbname=$(POSTGRES_DBNAME)
 
+helm_minio_args = \
+    --set minio.secret.user=$(MINIO_USER) \
+    --set minio.secret.password=$(MINIO_PASSWORD) \
+    --set minio.secret.host=$(MINIO_HOST) \
+    --set-string minio.secret.port=$(MINIO_PORT) \
+    --set-json minio.buckets='[$(shell echo "$(MINIO_BUCKETS)" | sed 's/,/","/g' | sed 's/^/"/' | sed 's/$$/"/')]'
+
+helm_tempo_args = \
+    --set minio.s3.accessKeyId=$(MINIO_USER) \
+    --set minio.s3.accessKeySecret=$(MINIO_PASSWORD) \
+    --set minio.s3.bucket=tempo
+
 .PHONY: help
 help:
 	@echo "OpenShift AI Observability Summarizer - Build & Deploy"
@@ -151,11 +173,17 @@ help:
 	@echo "  generate-model-config - Generate JSON config for specified LLM using template"
 	@echo "  install-ingestion-pipeline - Install extra ingestion pipelines"
 	@echo ""
-	@echo "Tracing:"
-	@echo "  install-observability - Install TempoStack and OpenTelemetry Collector (idempotent)"
+	@echo "Observability Stack:"
+	@echo "  install-observability-stack - Install complete observability stack (MinIO + TempoStack + OTEL + tracing)"
+	@echo "  uninstall-observability-stack - Uninstall complete observability stack (tracing + TempoStack + OTEL + MinIO)"
+	@echo ""
+	@echo "Individual Components:"
+	@echo "  install-observability - Install TempoStack and OTEL Collector only"
+	@echo "  uninstall-observability - Uninstall TempoStack and OTEL Collector only"
 	@echo "  setup-tracing - Enable auto-instrumentation for tracing in target namespace (idempotent)"
 	@echo "  remove-tracing - Disable auto-instrumentation for tracing in target namespace"
-	@echo "  uninstall-observability - Uninstall observability components (Tempo and OTEL Collector)"
+	@echo "  install-minio - Install MinIO observability storage backend only"
+	@echo "  uninstall-minio - Uninstall MinIO observability storage backend only"
 	@echo ""
 	@echo "Alerting:"
 	@echo "  install-alerts     - Install alerting Helm chart"
@@ -186,6 +214,9 @@ help:
 	@echo "  SAFETY             - Safety model id"
 	@echo "  ALERTS             - Set to TRUE to install alerting with main deployment"
 	@echo "  SLACK_WEBHOOK_URL  - Slack Webhook URL for alerting (will prompt if not provided)"
+	@echo "  MINIO_USER         - MinIO username for observability storage (default: admin)"
+	@echo "  MINIO_PASSWORD     - MinIO password for observability storage (default: minio123)"
+	@echo "  MINIO_BUCKETS      - Comma-separated list of MinIO buckets to create (default: tempo,loki)"
 	@echo ""
 
 .PHONY: build
@@ -276,8 +307,11 @@ namespace:
 
 .PHONY: depend
 depend:
-	@echo "Updating Helm dependencies..."
+	@echo "Updating Helm dependencies (for $(RAG_CHART))..."
 	@cd deploy/helm && helm dependency update $(RAG_CHART) || exit 1
+
+	@echo "Updating Helm dependencies (for $(MINIO_CHART))..."
+	@cd deploy/helm && helm dependency update $(MINIO_CHART_PATH) || exit 1
 
 
 .PHONY: install-metric-mcp
@@ -358,6 +392,7 @@ install-rag: namespace
 	@$(eval LLM_SERVICE_ARGS := $(call helm_llm_service_args))
 	@$(eval LLAMA_STACK_ARGS := $(call helm_llama_stack_args))
 	@$(eval PGVECTOR_ARGS := $(call helm_pgvector_args))
+
 	@echo "Installing $(RAG_CHART) helm chart (backend services only)"
 	@cd deploy/helm && helm -n $(NAMESPACE) upgrade --install $(RAG_CHART) $(RAG_CHART) \
 	--atomic --timeout 25m \
@@ -368,15 +403,13 @@ install-rag: namespace
 	@oc wait -n $(NAMESPACE) --for=condition=Ready --timeout=60m inferenceservice --all ||:
 	@echo "$(RAG_CHART) installed successfully"
 
+
 .PHONY: install
-install: namespace depend validate-llm install-rag install-metric-mcp install-metric-ui install-mcp-server delete-jobs
+install: namespace depend validate-llm install-observability-stack install-rag install-metric-mcp install-metric-ui install-mcp-server delete-jobs
 	@if [ "$(ALERTS)" = "TRUE" ]; then \
 		echo "ALERTS flag is set to TRUE. Installing alerting..."; \
 		$(MAKE) install-alerts NAMESPACE=$(NAMESPACE); \
 	fi
-
-	@$(MAKE) install-observability
-	@$(MAKE) setup-tracing NAMESPACE=$(NAMESPACE)
 	@echo "Installation complete."
 
 .PHONY: install-with-alerts
@@ -387,7 +420,7 @@ install-with-alerts:
 		exit 1; \
 	fi
 	@echo "🚀 Deploying to OpenShift namespace: $(NAMESPACE) with alerting"
-	@$(MAKE) namespace depend validate-llm install-rag install-metric-mcp install-metric-ui install-mcp-server delete-jobs install-alerts NAMESPACE=$(NAMESPACE)
+	@$(MAKE) namespace depend validate-llm install-observability-stack install-rag install-metric-mcp install-metric-ui install-mcp-server delete-jobs install-alerts NAMESPACE=$(NAMESPACE)
 	@echo "✅ Deployment with alerting completed"
 
 # Delete all jobs in the namespace
@@ -435,8 +468,8 @@ uninstall:
 	@echo "🗑️  Uninstalling from OpenShift namespace: $(NAMESPACE)"
 	@echo "Uninstalling $(RAG_CHART) helm chart"
 	- @helm -n $(NAMESPACE) uninstall $(RAG_CHART) --ignore-not-found
-	@echo "Removing pgvector and minio PVCs from $(NAMESPACE)"
-	- @oc get pvc -n $(NAMESPACE) -o custom-columns=NAME:.metadata.name | grep -E '^(pg|minio)-data' | xargs -I {} oc delete pvc -n $(NAMESPACE) {} ||:
+	@echo "Removing pgvector PVCs from $(NAMESPACE)"
+	- @oc delete pvc -n $(NAMESPACE) -l app.kubernetes.io/name=pgvector ||:
 	@if helm list -n $(NAMESPACE) -q | grep -q "^$(ALERTING_RELEASE_NAME)$$"; then \
 		echo "→ Detected alerting chart $(ALERTING_RELEASE_NAME). Uninstalling alerting..."; \
 		$(MAKE) uninstall-alerts NAMESPACE=$(NAMESPACE); \
@@ -450,10 +483,8 @@ uninstall:
 	- @helm -n $(NAMESPACE) uninstall $(MCP_SERVER_RELEASE_NAME) --ignore-not-found
 
 	@if [ "$(UNINSTALL_OBSERVABILITY)" = "true" ]; then \
-		echo "Removing tracing instrumentation from namespace $(NAMESPACE)"; \
-		$(MAKE) remove-tracing NAMESPACE=$(NAMESPACE) || true; \
-		echo "Uninstalling observability stack"; \
-		$(MAKE) uninstall-observability || true; \
+		echo "Uninstalling observability stack (includes tracing and MinIO)"; \
+		$(MAKE) uninstall-observability-stack NAMESPACE=$(NAMESPACE) || true; \
 	else \
 		echo "\n❌ WARNING: UNINSTALL_OBSERVABILITY is not set to 'true'"; \
 		echo "   Skipping removal of shared observability infrastructure to protect other teams."; \
@@ -461,8 +492,7 @@ uninstall:
 		echo "   To remove observability infrastructure, run:"; \
 		echo "     → make uninstall NAMESPACE=$(NAMESPACE) UNINSTALL_OBSERVABILITY=true\n"; \
 		echo "   Or remove components individually:"; \
-		echo "     → make remove-tracing NAMESPACE=$(NAMESPACE)"; \
-		echo "     → make uninstall-observability"; \
+		echo "     → make uninstall-observability-stack NAMESPACE=$(NAMESPACE)  # (includes tracing and MinIO)"; \
 	fi
 
 	@echo "\nRemaining resources in namespace $(NAMESPACE):"
@@ -724,11 +754,12 @@ install-observability:
 	@if helm list -n $(OBSERVABILITY_NAMESPACE) 2>/dev/null | grep -q "^tempo\s"; then \
 		echo "  → TempoStack already installed, skipping..."; \
 	else \
-		echo "Installing TempoStack and MinIO in namespace $(OBSERVABILITY_NAMESPACE)"; \
+		echo "Installing TempoStack in namespace $(OBSERVABILITY_NAMESPACE)"; \
 		cd deploy/helm && helm upgrade --install tempo ./observability/tempo \
 			--namespace $(OBSERVABILITY_NAMESPACE) \
 			--create-namespace \
-			--set global.namespace=$(OBSERVABILITY_NAMESPACE); \
+			--set global.namespace=$(OBSERVABILITY_NAMESPACE) \
+			$(helm_tempo_args); \
 	fi
 
 	@if helm list -n $(OBSERVABILITY_NAMESPACE) 2>/dev/null | grep -q "^otel-collector\s"; then \
@@ -740,6 +771,9 @@ install-observability:
 			--create-namespace \
 			--set global.namespace=$(OBSERVABILITY_NAMESPACE); \
 	fi
+
+.PHONY: install-observability-stack
+install-observability-stack: install-minio setup-tracing install-observability
 
 .PHONY: setup-tracing
 setup-tracing: namespace
@@ -760,6 +794,41 @@ remove-tracing: namespace
 
 .PHONY: uninstall-observability
 uninstall-observability:
-	@echo "Uninstalling TempoStack and MinIO and Otel Collector in namespace $(OBSERVABILITY_NAMESPACE)"
+	@echo "Uninstalling TempoStack and Otel Collector in namespace $(OBSERVABILITY_NAMESPACE)"
 	@helm uninstall tempo -n $(OBSERVABILITY_NAMESPACE)
 	@helm uninstall otel-collector -n $(OBSERVABILITY_NAMESPACE)
+
+	@echo "Removing TempoStack PVCs from $(OBSERVABILITY_NAMESPACE)"
+	- @oc delete pvc -n $(OBSERVABILITY_NAMESPACE) -l app.kubernetes.io/name=tempo --timeout=30s ||:
+
+.PHONY: uninstall-observability-stack
+uninstall-observability-stack: remove-tracing uninstall-observability uninstall-minio
+
+
+.PHONY: install-minio
+install-minio:
+	@$(eval MINIO_ARGS := $(call helm_minio_args))
+
+	@echo "→ Checking if $(MINIO_CHART) already exists in namespace $(MINIO_NAMESPACE)"
+	@if helm list -n $(MINIO_NAMESPACE) 2>/dev/null | grep -q "^$(MINIO_CHART)\s"; then \
+		echo "  → $(MINIO_CHART) already installed, skipping..."; \
+	else \
+		echo "Installing $(MINIO_CHART) helm chart"; \
+		cd deploy/helm && helm -n $(MINIO_NAMESPACE) upgrade --install $(MINIO_CHART) $(MINIO_CHART_PATH) \
+		--atomic --timeout 5m \
+		$(MINIO_ARGS); \
+		oc wait -n $(MINIO_NAMESPACE) --for=condition=Ready --timeout=5m inferenceservice --all ||:; \
+		echo "$(MINIO_CHART) installed successfully"; \
+	fi
+	@echo "→ Cleaning up broken upstream routes (pointing to non-existent 'minio' service)"
+	- @oc delete route minio-api minio-webui -n $(MINIO_NAMESPACE) --ignore-not-found ||:
+	@echo "  → Broken upstream routes cleaned up"
+
+
+.PHONY: uninstall-minio
+uninstall-minio:
+	@echo "Uninstalling $(MINIO_CHART) in namespace $(MINIO_NAMESPACE)"
+	@helm -n $(MINIO_NAMESPACE) uninstall $(MINIO_CHART) --ignore-not-found
+
+	@echo "Removing minio PVCs from $(MINIO_NAMESPACE)"
+	- @oc delete pvc -n $(MINIO_NAMESPACE) -l app.kubernetes.io/name=$(MINIO_CHART) --timeout=30s ||:

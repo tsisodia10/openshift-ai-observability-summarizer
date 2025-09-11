@@ -184,5 +184,8 @@ cython_debug/
 src/api/log.txt
 src/mcp_log.txt
 
+# helm charts dir
+charts/
+
 # TMP directory (if any)
 TMP/
