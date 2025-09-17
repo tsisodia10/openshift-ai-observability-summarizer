@@ -5,3 +5,8 @@ matplotlib
 fastmcp
 structlog
 anthropic>=0.7.0
+fastmcp>=2.11
+anthropic>=0.39.0
+structlog>=25.0.0
+trio>=0.30.0
+mcp[client]>=1.13.0
