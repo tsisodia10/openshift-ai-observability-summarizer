@@ -574,7 +574,6 @@ def select_best_metric(
             # Parse LLM response
             if llm_response and isinstance(llm_response, str):
                 # Try to extract JSON from response
-                import re
                 json_match = re.search(r'\{.*\}', llm_response, re.DOTALL)
                 if json_match:
                     json_str = json_match.group(0)
@@ -1351,7 +1350,6 @@ def _extract_keywords_for_filtering(question: str) -> List[str]:
     
     # 9. FALLBACK: Extract meaningful words from question
     if not keywords:
-        import re
         stop_words = {'the', 'is', 'are', 'was', 'were', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for', 'of', 'with', 'by', 'what', 'how', 'when', 'where', 'why', 'this', 'that', 'any', 'many', 'much'}
         words = re.findall(r'\\b[a-zA-Z]{3,}\\b', question_lower)
         meaningful_words = [w for w in words if w not in stop_words]

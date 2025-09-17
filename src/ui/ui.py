@@ -37,7 +37,7 @@ from mcp_client_helper import get_namespaces_mcp, get_models_mcp, get_model_conf
 import sys
 import os
 sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'mcp_server'))
-from claude_integration import PrometheusChatBot
+from mcp_server.claude_integration import PrometheusChatBot
 import importlib.util
 
 # Import PrometheusChatBot using direct file loading to avoid import issues
