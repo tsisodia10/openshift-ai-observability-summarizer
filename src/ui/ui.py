@@ -32,11 +32,32 @@ import os
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
 from mcp_client_helper import get_namespaces_mcp, get_models_mcp, get_model_config_mcp, analyze_vllm_mcp, calculate_metrics_mcp, get_vllm_metrics_mcp
+<<<<<<< HEAD
 from error_handler import parse_mcp_error, display_mcp_error, display_error_with_context
+=======
+from mcp_client_helper import get_namespaces_mcp, get_models_mcp, get_model_config_mcp
+import sys
+import os
+sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'mcp_server'))
+from claude_integration import PrometheusChatBot
+>>>>>>> 5d14503 (Add MCP tool for chat with prometheus)
 
 # --- Config ---
 API_URL = os.getenv("METRICS_API_URL", "http://localhost:8000")
 PROM_URL = os.getenv("PROM_URL", "http://localhost:9090")
+
+# --- Claude Chat Bot ---
+@st.cache_resource
+def get_claude_chatbot():
+    """Initialize Claude chat bot with caching."""
+    try:
+        api_key = os.getenv("ANTHROPIC_API_KEY")
+        if not api_key:
+            return None
+        return PrometheusChatBot(api_key=api_key)
+    except Exception as e:
+        st.error(f"Failed to initialize Claude chat bot: {e}")
+        return None
 
 # --- Page Setup ---
 st.set_page_config(page_title="AI Metric Tools", layout="wide")
@@ -1134,7 +1155,10 @@ if page == "vLLM Metric Summarizer":
 
 # --- 🤖 Chat with Prometheus Page ---
 elif page == "Chat with Prometheus":
-    st.markdown("<h1>Chat with Prometheus</h1>", unsafe_allow_html=True)
+    st.markdown("<h1>🤖 Chat with Prometheus</h1>", unsafe_allow_html=True)
+    
+    # Initialize Claude chat bot
+    claude_chatbot = get_claude_chatbot()
     
     # Display current scope configuration
     if chat_scope == "Fleet-wide":
@@ -1148,86 +1172,58 @@ elif page == "Chat with Prometheus":
             "Ask questions like: `What's the P95 latency in past 1 hour?`, `Is GPU usage stable in my namespace?`, `What alerts were firing in my namespace yesterday?` etc."
         )
     
-    # Helpful hint about dynamic time parsing
-    st.info(
-        "💡 **Smart Time Parsing**: Just mention time naturally in your question! "
-        "Examples: *'past 15 minutes'*, *'last 3 hours'*, *'yesterday'*, *'past 2 weeks'*"
-    )
-
+    # Claude integration status
+    if claude_chatbot:
+        st.success("✅ Claude AI is connected and ready!")
+        if claude_chatbot.test_connection():
+            st.info("🔗 MCP tools are working properly")
+        else:
+            st.warning("⚠️ MCP tools connection issue")
+    else:
+        st.error("❌ Claude AI not available. Please set ANTHROPIC_API_KEY environment variable.")
+        st.info("💡 **Smart Time Parsing**: Just mention time naturally in your question! "
+                "Examples: *'past 15 minutes'*, *'last 3 hours'*, *'yesterday'*, *'past 2 weeks'*")
+    
     # --- Chat history management ---
-    if "messages" not in st.session_state:
-        st.session_state.messages = []  # List to store chat messages
+    if "claude_messages" not in st.session_state:
+        st.session_state.claude_messages = []  # List to store chat messages
 
     # Display previous chat messages
-    for message in st.session_state.messages:
+    for message in st.session_state.claude_messages:
         with st.chat_message(message["role"]):
             st.markdown(message["content"])
 
-    user_question = st.chat_input("Your question")
-    if user_question:
-        st.session_state.messages.append({"role": "user", "content": user_question})
+    user_question = st.chat_input("Ask Claude about your Prometheus metrics...")
+    if user_question and claude_chatbot:
+        st.session_state.claude_messages.append({"role": "user", "content": user_question})
         with st.chat_message("user"):
             st.markdown(user_question)
 
-        with st.spinner("Querying and summarizing..."):
+        with st.spinner("🤔 Claude is thinking..."):
             try:
-                # Convert chat scope to backend format
-                backend_chat_scope = "fleet_wide" if chat_scope == "Fleet-wide" else "namespace_specific"
+                # Convert chat scope to the format expected by Claude
+                scope_for_claude = "cluster" if chat_scope == "Fleet-wide" else "namespace"
                 
-                response = requests.post(
-                    f"{API_URL}/chat-metrics",
-                    json={
-                        "model_name": model_name or "default",  # Provide default if None
-                        "question": user_question,
-                        "start_ts": selected_start,
-                        "end_ts": selected_end,
-                        "namespace": selected_namespace or "",  # Provide empty string if None
-                        "summarize_model_id": multi_model_name,
-                        "api_key": api_key,
-                        "chat_scope": backend_chat_scope,
-                    },
+                # Get response from Claude
+                response = claude_chatbot.chat(
+                    user_question,
+                    namespace=selected_namespace,
+                    scope=scope_for_claude
                 )
-                data = response.json()
-                promql = data.get("promql", "")
-                summary = data.get("summary", "")
-                chat_scope_response = data.get("chat_scope", "namespace_specific")
-                time_range = data.get("time_range", "")
                 
-                if not summary:
-                    st.error("Error: Missing summary in response from AI.")
-                else:
-                    # Adding AI response to history ---
-                    ai_response_content = ""
-                    
-                    # Show generated PromQL
-                    if promql:
-                        ai_response_content += (
-                            "**Generated PromQL:**\n```promql\n" + promql + "\n```\n\n"
-                        )
-                    else:
-                        ai_response_content += (
-                            "_No direct PromQL generated for this question._\n\n"
-                        )
-
-                    
-                    scope_display = "Fleet-wide" if chat_scope_response.lower() == "fleet_wide" else "Namespace-specific"
-
-                    # Show AI Summary 
-                    ai_response_content += "**AI Summary with Scope " + scope_display + ":**\n\n" + summary
-                    
-                    # Show additional context if available
-                    if time_range:
-                        ai_response_content += f"\n\n📅 **Time Range:** {time_range}"
-                    # ai_response_content += f"\n🔍 **Scope:** {scope_display}"
-
-                    st.session_state.messages.append(
-                        {"role": "assistant", "content": ai_response_content}
-                    )
-                    with st.chat_message("assistant"):
-                        st.markdown(ai_response_content)
+                # Add Claude's response to history
+                st.session_state.claude_messages.append({"role": "assistant", "content": response})
+                with st.chat_message("assistant"):
+                    st.markdown(response)
 
             except Exception as e:
-                st.error(f"Error: {e}")
+                error_msg = f"Sorry, I encountered an error: {str(e)}"
+                st.session_state.claude_messages.append({"role": "assistant", "content": error_msg})
+                with st.chat_message("assistant"):
+                    st.markdown(error_msg)
+    
+    elif user_question and not claude_chatbot:
+        st.error("Please set ANTHROPIC_API_KEY environment variable to use Claude AI")
 
 
 # --- 🔧 OpenShift Metrics Page ---

@@ -8,3 +8,4 @@ markdown
 weasyprint
 dateparser
 structlog
+anthropic>=0.39.0

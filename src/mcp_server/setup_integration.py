@@ -74,14 +74,16 @@ def get_mcp_stdio_executable(project_root: Path) -> str:
     venv_path = find_virtual_env(project_root)
     if not venv_path:
         print("⚠️  Warning: Virtual environment not found, using system Python")
-        return "obs-mcp-stdio"
+        return "python3"
+    
+    # Use python3 from venv + stdio_server.py directly
     if platform.system() == "Windows":
-        executable = venv_path / "Scripts" / "obs-mcp-stdio.exe"
-        if not executable.exists():
-            executable = venv_path / "Scripts" / "obs-mcp-stdio"
+        python_exe = venv_path / "Scripts" / "python.exe"
     else:
-        executable = venv_path / "bin" / "obs-mcp-stdio"
-    return str(executable)
+        python_exe = venv_path / "bin" / "python3"
+    
+    stdio_script = project_root / "src" / "mcp_server" / "stdio_server.py"
+    return f"{python_exe} {stdio_script}"
 
 
 def get_claude_config_path() -> Path:
@@ -111,11 +113,16 @@ def backup_config(config_path: Path) -> Optional[Path]:
 
 def generate_claude_config(mcp_stdio_path: str) -> Dict[str, Any]:
     """Generate Claude Desktop MCP configuration (STDIO)."""
+    # Split command and args
+    parts = mcp_stdio_path.split()
+    command = parts[0]
+    args = parts[1:] if len(parts) > 1 else []
+    
     return {
         "mcpServers": {
             "ai-observability": {
-                "command": mcp_stdio_path,
-                # No args needed for stdio server
+                "command": command,
+                "args": args,
                 "env": {
                     "PROMETHEUS_URL": "http://localhost:9090",
                     "LLAMA_STACK_URL": "http://localhost:8321/v1/openai/v1",
@@ -127,14 +134,26 @@ def generate_claude_config(mcp_stdio_path: str) -> Dict[str, Any]:
                     "list_namespaces",
                     "get_model_config",
                     "analyze_vllm",
-                    "analyze_openshift"
+                    "search_metrics",
+                    "get_metric_metadata",
+                    "get_label_values",
+                    "execute_promql",
+                    "explain_results",
+                    "suggest_queries",
+                    "select_best_metric"
                 ],
                 "alwaysAllow": [
                     "list_models", 
                     "list_namespaces",
                     "get_model_config",
                     "analyze_vllm",
-                    "analyze_openshift"
+                    "search_metrics",
+                    "get_metric_metadata",
+                    "get_label_values",
+                    "execute_promql",
+                    "explain_results",
+                    "suggest_queries",
+                    "select_best_metric"
                 ],
                 "disabled": False
             }
@@ -182,14 +201,28 @@ def write_config(config_path: Path, config: Dict[str, Any]) -> bool:
 
 
 def test_mcp_server(mcp_path: str) -> bool:
-    """Test if the MCP server executable exists. Avoid running it (stdio)."""
+    """Test if the MCP server components exist."""
     try:
-        p = Path(mcp_path)
-        if p.exists() and os.access(p, os.X_OK):
-            print("✅ MCP server binary found")
-            return True
-        print(f"❌ MCP server not executable or missing: {mcp_path}")
-        return False
+        # Split command and args
+        parts = mcp_path.split()
+        command = parts[0]
+        args = parts[1:] if len(parts) > 1 else []
+        
+        # Check if command exists
+        command_path = Path(command)
+        if not command_path.exists():
+            print(f"❌ Command not found: {command}")
+            return False
+        
+        # Check if stdio_server.py exists
+        if args:
+            stdio_script = Path(args[0])
+            if not stdio_script.exists():
+                print(f"❌ STDIO server script not found: {stdio_script}")
+                return False
+        
+        print("✅ MCP server components found")
+        return True
     except Exception as e:
         print(f"❌ Error testing MCP server: {e}")
         return False

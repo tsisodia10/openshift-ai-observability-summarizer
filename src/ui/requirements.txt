@@ -4,3 +4,4 @@ pandas
 matplotlib
 fastmcp
 structlog
+anthropic>=0.7.0
