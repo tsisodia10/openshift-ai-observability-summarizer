@@ -54,6 +54,16 @@ def _validate_and_extract_response(
                 raise ValueError(f"Invalid {provider} response content")
 
             return parts[0]["text"].strip()
+        elif provider == "anthropic":
+            # Anthropic Claude response format
+            if "content" not in response_json or not response_json["content"]:
+                raise ValueError(f"Invalid {provider} response format")
+            
+            content = response_json["content"]
+            if not content or "text" not in content[0]:
+                raise ValueError(f"Invalid {provider} response content")
+                
+            return content[0]["text"].strip()
         else:
             # OpenAI and other providers using "choices" format
             if "choices" not in response_json or not response_json["choices"]:
@@ -131,6 +141,17 @@ def summarize_with_llm(
 
             payload = {
                 "contents": [{"parts": [{"text": prompt}]}],
+            }
+        elif provider == "anthropic":
+            # Anthropic Claude API format
+            headers["Authorization"] = f"Bearer {api_key}"
+            headers["anthropic-version"] = "2023-06-01"
+            
+            payload = {
+                "model": model_name,
+                "messages": llm_messages,
+                "max_tokens": max_tokens,
+                "temperature": DETERMINISTIC_TEMPERATURE,
             }
         else:
             # OpenAI and compatible APIs

@@ -37,7 +37,7 @@ def main():
         os.environ["PYTHONUNBUFFERED"] = "1"
         
         # Import and initialize server with print suppressed
-        from mcp_server.mcp import ObservabilityMCPServer
+        from mcp_server.observability_mcp import ObservabilityMCPServer
         server = ObservabilityMCPServer()
         
         # Restore original stdout for MCP JSON-RPC communication

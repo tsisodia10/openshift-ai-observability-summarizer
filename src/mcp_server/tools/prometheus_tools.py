@@ -55,29 +55,27 @@ def search_metrics(
     pattern: str = "",
     limit: int = 50
 ) -> List[Dict[str, Any]]:
-    """Search for metrics by name pattern.
+    """Intelligently search for metrics using semantic understanding.
     
     Args:
-        pattern: Regex pattern to match metric names (e.g., "cpu", "memory", "vllm")
+        pattern: Search terms (e.g., "tokens", "gpu temperature", "pod status")
         limit: Maximum number of metrics to return
     
     Returns:
-        List of matching metrics with their names and basic info
+        List of matching metrics ranked by relevance
     """
     try:
         # Get all metric names
         response = _make_prometheus_request("/api/v1/label/__name__/values")
         all_metrics = response.get("data", [])
         
-        # Filter by pattern if provided
+        # Use semantic search if pattern provided
         if pattern:
-            regex = re.compile(pattern, re.IGNORECASE)
-            matching_metrics = [m for m in all_metrics if regex.search(m)]
+            # Use our dynamic selection to rank metrics
+            ranked_metrics = _rank_metrics_by_relevance(pattern, all_metrics)
+            matching_metrics = ranked_metrics[:limit]
         else:
-            matching_metrics = all_metrics
-        
-        # Limit results
-        matching_metrics = matching_metrics[:limit]
+            matching_metrics = all_metrics[:limit]
         
         # Get basic info for each metric
         metrics_info = []
@@ -621,70 +619,873 @@ def select_best_metric(
 
 
 def _fallback_metric_selection(user_intent: str, available_metrics: List[str]) -> str:
-    """Fallback metric selection using simple keyword matching.
+    """Dynamic metric selection using semantic analysis and pattern matching.
     
-    This is used when LLM selection fails or is unavailable.
+    This automatically understands metrics based on their names and context,
+    without any hardcoded mappings.
     """
     intent_lower = user_intent.lower()
+    intent_words = set(intent_lower.replace('-', ' ').replace('_', ' ').replace(':', ' ').split())
     
-    # Define keyword mappings
-    keyword_mappings = {
-        # GPU metrics
-        "gpu": ["DCGM_FI_DEV_GPU_UTIL", "DCGM_FI_DEV_GPU_TEMP", "DCGM_FI_DEV_GPU_MEMORY"],
-        "utilization": ["DCGM_FI_DEV_GPU_UTIL", "node_cpu_seconds_total"],
-        "temperature": ["DCGM_FI_DEV_GPU_TEMP", "node_hwmon_temp_celsius"],
-        
-        # Memory metrics
-        "memory": ["node_memory_MemTotal_bytes", "node_memory_MemAvailable_bytes", "node_memory_MemFree_bytes"],
-        "ram": ["node_memory_MemTotal_bytes", "node_memory_MemAvailable_bytes"],
-        
-        # CPU metrics
-        "cpu": ["node_cpu_seconds_total", "node_load1", "node_load5", "node_load15"],
-        
-        # Kubernetes metrics
-        "pod": ["kube_pod_status_phase", "kube_pod_info"],
-        "container": ["kube_pod_container_status_ready", "kube_pod_container_status_running"],
-        "deployment": ["kube_deployment_status_replicas_ready", "kube_deployment_status_replicas"],
-        
-        # Alert metrics
-        "alert": ["ALERTS", "ALERTS_FOR_STATE"],
-        "alerts": ["ALERTS", "ALERTS_FOR_STATE"],
-        
-        # vLLM metrics
-        "vllm": ["vllm:e2e_request_latency_seconds", "vllm:time_to_first_token_seconds"],
-        "latency": ["vllm:e2e_request_latency_seconds", "vllm:time_to_first_token_seconds"],
-        "inference": ["vllm:e2e_request_latency_seconds", "vllm:time_to_first_token_seconds"],
-        
-        # System metrics
-        "disk": ["node_filesystem_size_bytes", "node_filesystem_free_bytes"],
-        "network": ["node_network_receive_bytes_total", "node_network_transmit_bytes_total"],
-        "load": ["node_load1", "node_load5", "node_load15"]
-    }
-    
-    # Find best matching metric
     best_match = None
     best_score = 0
     
-    for keyword, preferred_metrics in keyword_mappings.items():
-        if keyword in intent_lower:
-            # Check if any preferred metrics are available
-            for metric in preferred_metrics:
-                if metric in available_metrics:
-                    # Calculate score based on keyword relevance
-                    score = len(keyword) / len(intent_lower)  # Simple scoring
-                    if score > best_score:
-                        best_score = score
-                        best_match = metric
+    for metric in available_metrics:
+        metric_lower = metric.lower()
+        metric_words = set(metric_lower.replace('-', ' ').replace('_', ' ').replace(':', ' ').split())
+        
+        score = 0
+        
+        # 1. Direct word matches (highest priority)
+        direct_matches = intent_words.intersection(metric_words)
+        score += len(direct_matches) * 10
+        
+        # 2. Semantic pattern matching
+        score += _calculate_semantic_score(intent_lower, metric_lower)
+        
+        # 3. Metric type relevance
+        score += _calculate_type_relevance(intent_lower, metric_lower)
+        
+        # 4. Specificity bonus (more specific metrics get higher scores)
+        score += _calculate_specificity_score(metric_lower)
+        
+        if score > best_score:
+            best_score = score
+            best_match = metric
     
-    # If no keyword match found, try partial matching
-    if not best_match:
-        for metric in available_metrics:
+    return best_match or (available_metrics[0] if available_metrics else "")
+
+
+def _calculate_semantic_score(intent: str, metric: str) -> int:
+    """Calculate semantic relevance score between user intent and metric name."""
+    score = 0
+    
+    # Token/generation patterns
+    if any(word in intent for word in ['token', 'generate', 'generation', 'produced']):
+        if any(pattern in metric for pattern in ['token', 'generation']):
+            score += 15
+    
+    # Latency/performance patterns  
+    if any(word in intent for word in ['latency', 'response', 'time', 'p95', 'p99', 'percentile', 'speed', 'performance']):
+        if any(pattern in metric for pattern in ['latency', 'time', 'duration', 'seconds']):
+            score += 15
+    
+    # GPU patterns
+    if any(word in intent for word in ['gpu', 'graphics', 'cuda', 'nvidia']):
+        if any(pattern in metric for pattern in ['gpu', 'dcgm', 'cuda']):
+            score += 15
+    
+    # Memory patterns
+    if any(word in intent for word in ['memory', 'ram', 'mem']):
+        if any(pattern in metric for pattern in ['memory', 'mem', 'ram', 'bytes']):
+            score += 15
+    
+    # CPU patterns
+    if any(word in intent for word in ['cpu', 'processor', 'core']):
+        if any(pattern in metric for pattern in ['cpu', 'processor', 'core']):
+            score += 15
+    
+    # Pod/container patterns
+    if any(word in intent for word in ['pod', 'container', 'running', 'status', 'phase']):
+        if any(pattern in metric for pattern in ['pod', 'container', 'status', 'phase']):
+            score += 15
+    
+    # Request/usage patterns
+    if any(word in intent for word in ['request', 'usage', 'utilization', 'use']):
+        if any(pattern in metric for pattern in ['request', 'usage', 'util', 'use']):
+            score += 10
+    
+    # Alert patterns
+    if any(word in intent for word in ['alert', 'alarm', 'warning', 'error', 'issue', 'problem']):
+        if any(pattern in metric for pattern in ['alert', 'alarm']):
+            score += 15
+    
+    # Model/deployment discovery patterns
+    if any(word in intent for word in ['model', 'deploy', 'deployed', 'running']):
+        if any(pattern in metric for pattern in ['cache_config_info', 'pod_info', 'job', 'service']):
+            score += 15
+        # Prefer vLLM cache config for model discovery
+        if 'cache_config_info' in metric and 'vllm' in metric:
+            score += 25
+    
+    # CRITICAL FIX: Boost canonical Kubernetes state metrics for basic questions
+    if any(word in intent for word in ['pod', 'pods']) and any(word in intent for word in ['running', 'count', 'how many', 'number']):
+        if metric == 'kube_pod_status_phase':
+            score += 50  # Major boost for THE pod state metric
+        elif metric == 'kube_pod_info':
+            score += 30  # Secondary boost
+            
+    if any(word in intent for word in ['service', 'services']) and any(word in intent for word in ['deployed', 'count', 'how many', 'number']):
+        if metric == 'kube_service_info':
+            score += 50  # Major boost for THE service metric
+            
+    if any(word in intent for word in ['alert', 'alerts', 'firing']):
+        if metric == 'ALERTS':
+            score += 50  # Major boost for THE alert metric
+    
+    return score
+
+
+def _calculate_type_relevance(intent: str, metric: str) -> int:
+    """Calculate relevance based on metric type and user intent context."""
+    score = 0
+    
+    # Count-based questions
+    if any(word in intent for word in ['number', 'count', 'how many', 'total']):
+        if any(pattern in metric for pattern in ['total', 'count', 'num']):
+            score += 10
+        # Prefer status metrics for counting pods/containers
+        if 'pod' in intent and 'status' in metric:
+            score += 15
+    
+    # Rate/frequency questions
+    if any(word in intent for word in ['rate', 'per', 'frequency', 'throughput']):
+        if any(pattern in metric for pattern in ['rate', 'total', 'seconds']):
+            score += 10
+    
+    # Temperature questions
+    if any(word in intent for word in ['temperature', 'temp', 'hot', 'heat', 'thermal']):
+        if any(pattern in metric for pattern in ['temp', 'thermal']):
+            score += 20
+    
+    # Power/energy questions
+    if any(word in intent for word in ['power', 'energy', 'consumption', 'watt']):
+        if any(pattern in metric for pattern in ['power', 'energy', 'watt']):
+            score += 20
+    
+    return score
+
+
+def _calculate_specificity_score(metric: str) -> int:
+    """Give preference to more specific/targeted metrics."""
+    score = 0
+    
+    # Prefer more specific vLLM metrics
+    if metric.startswith('vllm:'):
+        score += 5
+    
+    # Prefer core kubernetes metrics
+    if metric.startswith('kube_'):
+        score += 3
+    
+    # Prefer DCGM GPU metrics over generic ones
+    if 'dcgm' in metric.lower():
+        score += 5
+    
+    # Penalize overly complex derived metrics
+    if len(metric.split(':')) > 2:  # e.g., cluster:namespace:pod:cpu:complex
+        score -= 3
+    
+    return score
+
+
+def _rank_metrics_by_relevance(search_term: str, all_metrics: List[str]) -> List[str]:
+    """Rank all metrics by relevance using semantic scoring + Prometheus metadata."""
+    scored_metrics = []
+    
+    for metric in all_metrics:
+        intent_lower = search_term.lower()
+        metric_lower = metric.lower()
+        
+        score = 0
+        
+        # 1. Direct word matches (metric name)
+        intent_words = set(intent_lower.replace('-', ' ').replace('_', ' ').replace(':', ' ').split())
+        metric_words = set(metric_lower.replace('-', ' ').replace('_', ' ').replace(':', ' ').split())
+        direct_matches = intent_words.intersection(metric_words)
+        score += len(direct_matches) * 10
+        
+        # 2. Semantic scoring based on metric name
+        score += _calculate_semantic_score(intent_lower, metric_lower)
+        score += _calculate_type_relevance(intent_lower, metric_lower)
+        score += _calculate_specificity_score(metric_lower)
+        
+        # 3. **NEW: Prometheus metadata scoring** (Skip for performance in ranking)
+        # metadata_score = _calculate_metadata_score(intent_lower, metric)
+        # score += metadata_score
+        
+        if score > 0:  # Only include metrics with some relevance
+            scored_metrics.append((metric, score))
+    
+    # Sort by score (descending) and return metric names
+    scored_metrics.sort(key=lambda x: x[1], reverse=True)
+    return [metric for metric, score in scored_metrics]
+
+
+def find_best_metric_with_metadata_v2(
+    user_question: str,
+    max_candidates: int = 10
+) -> List[Dict[str, Any]]:
+    """IMPROVED: Filter metrics by keywords first, then use metadata to select best.
+    
+    This is much more intelligent than semantic ranking all 3500+ metrics.
+    """
+    try:
+        # STEP 1: Extract keywords from user question
+        question_lower = user_question.lower()
+        keywords = _extract_keywords_for_filtering(question_lower)
+        
+        if not keywords:
+            # Fallback to original approach if no clear keywords
+            return find_best_metric_with_metadata(user_question, max_candidates)
+        
+        # STEP 2: Get all metrics and filter by keywords
+        response = _make_prometheus_request("/api/v1/label/__name__/values")
+        all_metrics = response.get("data", [])
+        
+        # Filter metrics that contain any of our keywords
+        filtered_metrics = []
+        for metric in all_metrics:
             metric_lower = metric.lower()
-            # Check if any word from user intent appears in metric name
-            intent_words = intent_lower.split()
-            for word in intent_words:
-                if len(word) > 2 and word in metric_lower:  # Avoid very short words
-                    return metric
+            if any(keyword in metric_lower for keyword in keywords):
+                filtered_metrics.append(metric)
+        
+        if not filtered_metrics:
+            error_result = {
+                "error": f"No metrics found containing keywords: {keywords}",
+                "keywords_used": keywords,
+                "alternatives_found": 0,
+                "suggested_promql": "# No matching metrics found",
+                "selection_reasoning": f"Searched {len(all_metrics)} total metrics but none matched keywords: {keywords}"
+            }
+            return _resp(json.dumps(error_result, indent=2))
+        
+        # STEP 3: Get metadata for filtered metrics and score them
+        metadata_scored_metrics = []
+        for metric in filtered_metrics:
+            try:
+                metadata_response = _make_prometheus_request("/api/v1/metadata", {"metric": metric})
+                metadata = metadata_response.get("data", {}).get(metric, [])
+                
+                if metadata:
+                    info = metadata[0]
+                    help_text = info.get("help", "")
+                    metric_type = info.get("type", "unknown")
+                    
+                    # Score based on metadata + question relevance
+                    score = _score_metric_with_metadata_for_question(
+                        metric, help_text, metric_type, question_lower
+                    )
+                    
+                    if score > 0:
+                        metadata_scored_metrics.append({
+                            'name': metric,
+                            'type': metric_type,
+                            'help': help_text,
+                            'score': score,
+                            'metadata': info
+                        })
+                        
+            except Exception as e:
+                logging.debug(f"Error getting metadata for {metric}: {e}")
+                continue
+        
+        if not metadata_scored_metrics:
+            error_result = {
+                "error": f"No metrics with metadata found for keywords: {keywords}",
+                "keywords_used": keywords,
+                "alternatives_found": len(filtered_metrics),
+                "suggested_promql": "# No metrics with valid metadata found",
+                "selection_reasoning": f"Found {len(filtered_metrics)} metrics matching keywords {keywords}, but none had usable metadata"
+            }
+            return _resp(json.dumps(error_result, indent=2))
+        
+        # STEP 4: Sort by metadata score and select best
+        metadata_scored_metrics.sort(key=lambda x: x['score'], reverse=True)
+        best_metric_data = metadata_scored_metrics[0]
+        
+        # STEP 5: Generate intelligent PromQL query
+        concepts = _extract_key_concepts(question_lower)
+        suggested_query = _generate_metadata_driven_promql_simple(
+            best_metric_data['name'], 
+            best_metric_data['type'], 
+            concepts
+        )
+        
+        # STEP 6: Format response
+        result = {
+            "selected_metric": {
+                "name": best_metric_data['name'],
+                "help": best_metric_data['help'],
+                "type": best_metric_data['type'],
+                "unit": best_metric_data['metadata'].get('unit', '')
+            },
+            "suggested_promql": suggested_query,
+            "selection_reasoning": f"Filtered {len(all_metrics)} metrics by keywords {keywords}, found {len(metadata_scored_metrics)} with metadata, selected highest scoring based on help text and type relevance",
+            "keywords_used": keywords,
+            "alternatives_found": len(metadata_scored_metrics),
+            "other_candidates": [
+                {
+                    "name": m['name'], 
+                    "score": m['score'],
+                    "help": m['help'][:50] + "..." if len(m['help']) > 50 else m['help']
+                } 
+                for m in metadata_scored_metrics[1:4]  # Show top 3 alternatives
+            ]
+        }
+        
+        return _resp(json.dumps(result, indent=2))
+        
+    except Exception as e:
+        logging.error(f"Error in metadata-first metric selection: {e}")
+        return _resp(f"Error analyzing metrics: {str(e)}", is_error=True)
+
+
+def find_best_metric_with_metadata(
+    user_question: str,
+    max_candidates: int = 10
+) -> List[Dict[str, Any]]:
+    """Find the best metric for a user question using comprehensive metadata analysis.
     
-    # Return best match or first available metric
-    return best_match if best_match else available_metrics[0]
+    This tool combines search, metadata analysis, and intelligent selection to find
+    the most appropriate metric for the user's question, providing detailed reasoning.
+    
+    Args:
+        user_question: User's question (e.g., "What's the GPU temperature?")
+        max_candidates: Maximum number of candidate metrics to analyze
+    
+    Returns:
+        Analysis with best metric, reasoning, and suggested PromQL query
+    """
+    try:
+        # STEP 1: Extract key concepts from user question
+        question_lower = user_question.lower()
+        concepts = _extract_key_concepts(question_lower)
+        
+        # STEP 2: Search for candidate metrics using semantic ranking
+        response = _make_prometheus_request("/api/v1/label/__name__/values")
+        all_metrics = response.get("data", [])
+        
+        # Get top candidates using our enhanced ranking
+        candidates = _rank_metrics_by_relevance(user_question, all_metrics)[:max_candidates]
+        
+        if not candidates:
+            return _resp("No relevant metrics found for your question.")
+        
+        # STEP 3: Analyze each candidate with metadata
+        analyzed_candidates = []
+        for metric in candidates:
+            analysis = _analyze_metric_with_metadata(metric, concepts, question_lower)
+            if analysis['relevance_score'] > 0:
+                analyzed_candidates.append(analysis)
+        
+        if not analyzed_candidates:
+            return _resp("No suitable metrics found after metadata analysis.")
+        
+        # STEP 4: Select the best metric based on comprehensive scoring
+        best_metric = max(analyzed_candidates, key=lambda x: x['total_score'])
+        
+        # STEP 5: Generate intelligent PromQL query
+        suggested_query = _generate_metadata_driven_promql(best_metric, concepts)
+        
+        # STEP 6: Format comprehensive response
+        result = {
+            "selected_metric": {
+                "name": best_metric['name'],
+                "help": best_metric['metadata'].get('help', ''),
+                "type": best_metric['metadata'].get('type', ''),
+                "unit": best_metric['metadata'].get('unit', '')
+            },
+            "relevance_analysis": {
+                "concept_matches": best_metric['concept_matches'],
+                "metadata_score": best_metric['metadata_score'],
+                "semantic_score": best_metric['semantic_score'],
+                "total_score": best_metric['total_score']
+            },
+            "suggested_promql": suggested_query,
+            "reasoning": best_metric['reasoning'],
+            "other_candidates": [
+                {
+                    "name": c['name'], 
+                    "score": c['total_score'],
+                    "why_not_selected": c.get('why_not_selected', 'Lower overall relevance')
+                } 
+                for c in analyzed_candidates[1:3]  # Show top 2 alternatives
+            ]
+        }
+        
+        return _resp(json.dumps(result, indent=2))
+        
+    except Exception as e:
+        logging.error(f"Error in metadata-driven metric selection: {e}")
+        return _resp(f"Error analyzing metrics: {str(e)}", is_error=True)
+
+
+def _extract_key_concepts(question: str) -> Dict[str, Any]:
+    """Extract key concepts from user question for metadata matching."""
+    concepts = {
+        'entities': [],
+        'measurements': [],
+        'aggregations': [],
+        'intent_type': 'unknown'
+    }
+    
+    # Entity detection
+    if any(word in question for word in ['gpu', 'graphics', 'cuda', 'nvidia']):
+        concepts['entities'].append('gpu')
+    if any(word in question for word in ['pod', 'container', 'kubernetes']):
+        concepts['entities'].append('pod')
+    if any(word in question for word in ['memory', 'ram', 'mem']):
+        concepts['entities'].append('memory')
+    if any(word in question for word in ['cpu', 'processor', 'core']):
+        concepts['entities'].append('cpu')
+    if any(word in question for word in ['vllm', 'model', 'inference', 'llm', 'deploy', 'deployed']):
+        concepts['entities'].append('vllm')
+    if any(word in question for word in ['deploy', 'deployed', 'models', 'running']):
+        concepts['entities'].append('deployment')
+    if any(word in question for word in ['alert', 'warning', 'error', 'problem']):
+        concepts['entities'].append('alert')
+    
+    # Measurement detection
+    if any(word in question for word in ['temperature', 'temp', 'hot', 'heat']):
+        concepts['measurements'].append('temperature')
+    if any(word in question for word in ['latency', 'response', 'time', 'duration']):
+        concepts['measurements'].append('latency')
+    if any(word in question for word in ['usage', 'utilization', 'use', 'percent']):
+        concepts['measurements'].append('usage')
+    if any(word in question for word in ['power', 'energy', 'consumption', 'watt']):
+        concepts['measurements'].append('power')
+    if any(word in question for word in ['token', 'generate', 'generation', 'produced']):
+        concepts['measurements'].append('tokens')
+    
+    # Intent type detection
+    if any(word in question for word in ['how many', 'number', 'count', 'total']):
+        concepts['intent_type'] = 'count'
+    elif any(word in question for word in ['what is', 'current', 'level', 'value']):
+        concepts['intent_type'] = 'current_value'
+    elif any(word in question for word in ['average', 'avg', 'mean']):
+        concepts['intent_type'] = 'average'
+    elif any(word in question for word in ['p95', 'p99', 'percentile', '95th', '99th']):
+        concepts['intent_type'] = 'percentile'
+    
+    return concepts
+
+
+def _analyze_metric_with_metadata(metric_name: str, concepts: Dict[str, Any], question: str) -> Dict[str, Any]:
+    """Analyze a single metric using its metadata and user concepts."""
+    try:
+        # Get metadata
+        response = _make_prometheus_request("/api/v1/metadata", {"metric": metric_name})
+        metadata = response.get("data", {}).get(metric_name, [])
+        
+        if not metadata:
+            return {'name': metric_name, 'total_score': 0, 'relevance_score': 0}
+        
+        metadata_info = metadata[0]
+        help_text = metadata_info.get("help", "").lower()
+        metric_type = metadata_info.get("type", "").lower()
+        unit = metadata_info.get("unit", "").lower()
+        
+        analysis = {
+            'name': metric_name,
+            'metadata': metadata_info,
+            'concept_matches': [],
+            'metadata_score': 0,
+            'semantic_score': 0,
+            'type_compatibility': 0,
+            'reasoning': []
+        }
+        
+        # Score concept matches in help text
+        for entity in concepts['entities']:
+            if entity in help_text or entity in metric_name.lower():
+                analysis['concept_matches'].append(entity)
+                analysis['metadata_score'] += 20
+                analysis['reasoning'].append(f"Matches entity '{entity}' in help text or name")
+        
+        for measurement in concepts['measurements']:
+            if measurement in help_text or measurement in metric_name.lower():
+                analysis['concept_matches'].append(measurement)
+                analysis['metadata_score'] += 25
+                analysis['reasoning'].append(f"Measures '{measurement}' according to metadata")
+        
+        # Score intent compatibility with metric type
+        intent = concepts['intent_type']
+        
+        # FIXED: For count questions, prefer gauges for current state, counters for events
+        if intent == 'count':
+            if metric_type == 'gauge':
+                # Gauges are perfect for "how many X are running/deployed/exist" (current state)
+                analysis['type_compatibility'] = 25
+                analysis['reasoning'].append("Gauge type perfect for current state counting questions")
+            elif metric_type == 'counter':
+                # Counters are for "how many X were created/processed" (events)
+                analysis['type_compatibility'] = 10
+                analysis['reasoning'].append("Counter type suitable for event counting questions")
+                
+        elif intent == 'current_value' and metric_type == 'gauge':
+            analysis['type_compatibility'] = 20
+            analysis['reasoning'].append("Gauge type perfect for current value questions")
+        elif intent == 'percentile' and metric_type == 'histogram':
+            analysis['type_compatibility'] = 20
+            analysis['reasoning'].append("Histogram type perfect for percentile questions")
+        elif intent in ['average', 'current_value'] and metric_type == 'gauge':
+            analysis['type_compatibility'] = 15
+            analysis['reasoning'].append("Gauge type suitable for current measurements")
+        
+        # Score unit compatibility
+        unit_score = 0
+        if 'temperature' in concepts['measurements'] and ('celsius' in unit or 'c' == unit or 'temperature' in help_text):
+            unit_score = 15
+            analysis['reasoning'].append("Unit matches temperature measurement")
+        elif 'latency' in concepts['measurements'] and ('second' in unit or 'time' in help_text):
+            unit_score = 15
+            analysis['reasoning'].append("Unit matches time/latency measurement")
+        
+        # Calculate semantic score (existing logic)
+        analysis['semantic_score'] = _calculate_semantic_score(question, metric_name.lower())
+        
+        # Calculate total score
+        analysis['total_score'] = (
+            analysis['metadata_score'] + 
+            analysis['semantic_score'] + 
+            analysis['type_compatibility'] + 
+            unit_score
+        )
+        
+        analysis['relevance_score'] = analysis['total_score']
+        
+        # Add why this metric might not be selected
+        if analysis['total_score'] < 30:
+            analysis['why_not_selected'] = "Low relevance to user question"
+        elif not analysis['concept_matches']:
+            analysis['why_not_selected'] = "No clear concept matches"
+        elif analysis['type_compatibility'] == 0:
+            analysis['why_not_selected'] = "Metric type doesn't match question intent"
+        
+        return analysis
+        
+    except Exception as e:
+        logging.debug(f"Error analyzing metric {metric_name}: {e}")
+        return {'name': metric_name, 'total_score': 0, 'relevance_score': 0}
+
+
+def _generate_metadata_driven_promql(metric_analysis: Dict[str, Any], concepts: Dict[str, Any]) -> str:
+    """Generate PromQL query based on metric metadata and user intent."""
+    metric_name = metric_analysis['name']
+    metric_type = metric_analysis['metadata'].get('type', '').lower()
+    intent = concepts['intent_type']
+    
+    # Choose aggregation based on intent and metric type
+    if intent == 'count':
+        if metric_type == 'counter':
+            # For counters, we often want the total or rate
+            return f"sum({metric_name})"
+        else:
+            return f"count({metric_name})"
+    
+    elif intent == 'current_value':
+        if 'temperature' in concepts['measurements']:
+            return f"avg({metric_name})"  # Temperature should be averaged
+        elif 'usage' in concepts['measurements']:
+            return f"avg({metric_name})"  # Usage/utilization should be averaged
+        else:
+            return f"{metric_name}"  # Raw current value
+    
+    elif intent == 'average':
+        return f"avg({metric_name})"
+    
+    elif intent == 'percentile':
+        if metric_type == 'histogram':
+            return f"histogram_quantile(0.95, {metric_name}_bucket)"
+        else:
+            return f"quantile(0.95, {metric_name})"
+    
+    else:
+        # Default based on metric type
+        if metric_type == 'counter':
+            return f"rate({metric_name}[5m])"
+        elif metric_type == 'gauge':
+            if 'temperature' in concepts['measurements'] or 'usage' in concepts['measurements']:
+                return f"avg({metric_name})"
+            else:
+                return f"{metric_name}"
+        else:
+            return f"{metric_name}"
+
+
+def _calculate_metadata_score(intent: str, metric_name: str) -> int:
+    """Score metrics based on Prometheus metadata (help text, type, unit)."""
+    try:
+        # Get metadata from Prometheus
+        response = _make_prometheus_request("/api/v1/metadata", {"metric": metric_name})
+        metadata = response.get("data", {}).get(metric_name, [])
+        
+        if not metadata:
+            return 0
+            
+        metadata_info = metadata[0]  # Take first metadata entry
+        help_text = metadata_info.get("help", "").lower()
+        metric_type = metadata_info.get("type", "").lower()
+        unit = metadata_info.get("unit", "").lower()
+        
+        score = 0
+        
+        # Score based on help text relevance
+        intent_words = intent.split()
+        for word in intent_words:
+            if len(word) > 2 and word in help_text:
+                score += 15  # High score for help text matches
+        
+        # Score based on metric type relevance
+        if any(word in intent for word in ['count', 'number', 'total', 'how many']):
+            if metric_type in ['counter']:
+                score += 10
+        elif any(word in intent for word in ['current', 'level', 'usage', 'utilization']):
+            if metric_type in ['gauge']:
+                score += 10
+        elif any(word in intent for word in ['latency', 'time', 'duration', 'percentile', 'p95', 'p99']):
+            if metric_type in ['histogram']:
+                score += 10
+        
+        # Score based on unit relevance
+        if any(word in intent for word in ['temperature', 'temp', 'celsius']):
+            if 'c' in unit or 'celsius' in unit or 'temperature' in help_text:
+                score += 20
+        elif any(word in intent for word in ['memory', 'bytes', 'size']):
+            if 'byte' in unit or 'memory' in help_text:
+                score += 15
+        elif any(word in intent for word in ['time', 'latency', 'duration']):
+            if 'second' in unit or 'time' in help_text:
+                score += 15
+        
+        return score
+        
+    except Exception as e:
+        # If metadata lookup fails, don't penalize the metric
+        logging.debug(f"Metadata lookup failed for {metric_name}: {e}")
+        return 0
+
+
+def _extract_keywords_for_filtering(question: str) -> List[str]:
+    """Extract relevant keywords for ALL 3500+ metrics dynamically."""
+    keywords = []
+    question_lower = question.lower()
+    
+    # 1. KUBERNETES CORE (kube_* metrics)
+    k8s_entities = {
+        'pod': ['pod', 'pods', 'container'],
+        'service': ['service', 'services', 'svc'],
+        'node': ['node', 'nodes', 'worker'],
+        'namespace': ['namespace', 'namespaces', 'ns'],
+        'deployment': ['deployment', 'deployments', 'deploy'],
+        'volume': ['volume', 'volumes', 'pv', 'pvc', 'persistent'],
+        'job': ['job', 'jobs', 'cronjob'],
+        'ingress': ['ingress', 'route'],
+        'replicaset': ['replica', 'replicaset'],
+        'daemonset': ['daemon', 'daemonset'],
+        'statefulset': ['stateful', 'statefulset']
+    }
+    
+    for keyword, patterns in k8s_entities.items():
+        if any(pattern in question_lower for pattern in patterns):
+            keywords.append(keyword)
+    
+    # 2. SYSTEM RESOURCES (container_*, node_* metrics)
+    resources = {
+        'cpu': ['cpu', 'processor', 'core', 'throttl'],
+        'memory': ['memory', 'ram', 'mem', 'oom'],
+        'disk': ['disk', 'storage', 'io', 'filesystem', 'space'],
+        'network': ['network', 'net', 'packet', 'bandwidth', 'tcp', 'udp']
+    }
+    
+    for keyword, patterns in resources.items():
+        if any(pattern in question_lower for pattern in patterns):
+            keywords.append(keyword)
+    
+    # 3. GPU/HARDWARE (DCGM_*, gpu_* metrics)
+    if any(word in question_lower for word in ['gpu', 'graphics', 'nvidia', 'cuda', 'dcgm']):
+        keywords.extend(['gpu', 'dcgm'])
+    if any(word in question_lower for word in ['temperature', 'temp', 'thermal', 'hot']):
+        keywords.extend(['temp', 'temperature', 'dcgm'])
+    if any(word in question_lower for word in ['power', 'energy', 'consumption', 'watt']):
+        keywords.extend(['power', 'energy', 'dcgm'])
+    if any(word in question_lower for word in ['utilization', 'usage', 'util']):
+        keywords.append('util')
+    
+    # 4. AI/ML WORKLOADS (vllm:*, ollama_*, ray_* metrics)
+    ml_systems = {
+        'vllm': ['vllm', 'model', 'inference', 'llm', 'token', 'generation'],
+        'ollama': ['ollama'],
+        'ray': ['ray'],
+        'kubeflow': ['kubeflow', 'pipeline']
+    }
+    
+    for keyword, patterns in ml_systems.items():
+        if any(pattern in question_lower for pattern in patterns):
+            keywords.append(keyword)
+    
+    # 5. DATABASES (etcd_*, mysql_*, postgres_*, redis_* metrics)
+    databases = {
+        'etcd': ['etcd'],
+        'mysql': ['mysql', 'mariadb'],
+        'postgres': ['postgres', 'postgresql'],
+        'redis': ['redis', 'cache'],
+        'mongodb': ['mongo', 'mongodb'],
+        'elasticsearch': ['elasticsearch', 'elastic']
+    }
+    
+    for keyword, patterns in databases.items():
+        if any(pattern in question_lower for pattern in patterns):
+            keywords.append(keyword)
+    
+    # 6. MONITORING/ALERTING (alertmanager_*, prometheus_* metrics)
+    if any(word in question_lower for word in ['alert', 'alerts', 'firing', 'notification']):
+        keywords.extend(['alert', 'ALERTS'])
+    if any(word in question_lower for word in ['prometheus', 'scrape', 'target']):
+        keywords.append('prometheus')
+    if any(word in question_lower for word in ['grafana', 'dashboard']):
+        keywords.append('grafana')
+    
+    # 7. HTTP/API METRICS (http_*, api_* metrics)
+    if any(word in question_lower for word in ['http', 'request', 'response', 'status', 'api', 'endpoint']):
+        keywords.extend(['http', 'request'])
+    
+    # 8. PERFORMANCE METRICS (latency, errors, throughput)
+    if any(word in question_lower for word in ['latency', 'duration', 'time', 'p95', 'p99', 'percentile']):
+        keywords.append('latency')
+    if any(word in question_lower for word in ['error', 'fail', 'exception']):
+        keywords.append('error')
+    if any(word in question_lower for word in ['rate', 'throughput', 'qps', 'rps']):
+        keywords.append('rate')
+    
+    # 9. FALLBACK: Extract meaningful words from question
+    if not keywords:
+        import re
+        stop_words = {'the', 'is', 'are', 'was', 'were', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for', 'of', 'with', 'by', 'what', 'how', 'when', 'where', 'why', 'this', 'that', 'any', 'many', 'much'}
+        words = re.findall(r'\\b[a-zA-Z]{3,}\\b', question_lower)
+        meaningful_words = [w for w in words if w not in stop_words]
+        keywords.extend(meaningful_words[:2])  # Take up to 2 meaningful words
+    
+    return list(set(keywords))  # Remove duplicates
+
+
+def _score_metric_with_metadata_for_question(metric_name: str, help_text: str, metric_type: str, question: str) -> int:
+    """Score a metric based on its metadata relevance to the question."""
+    score = 0
+    
+    metric_lower = metric_name.lower()
+    help_lower = help_text.lower()
+    
+    # CORE SCORING: Help text relevance
+    question_words = question.split()
+    # Filter out common stop words that don't add meaning
+    stop_words = {'the', 'is', 'are', 'was', 'were', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for', 'of', 'with', 'by', 'what', 'how', 'when', 'where', 'why', 'this', 'that', 'these', 'those'}
+    
+    meaningful_matches = 0
+    for word in question_words:
+        word_clean = word.strip('?.,!').lower()
+        if len(word_clean) > 2 and word_clean not in stop_words and word_clean in help_lower:
+            meaningful_matches += 1
+            score += 25  # High score for meaningful help text matches
+    
+    # BONUS: Exact phrase matches (like "temperature" in "GPU temperature")
+    key_phrases = []
+    if 'temperature' in question:
+        key_phrases.append('temperature')
+    if 'utilization' in question or 'usage' in question:
+        key_phrases.append('utilization')
+    if 'power' in question:
+        key_phrases.append('power')
+    if 'latency' in question:
+        key_phrases.append('latency')
+    if 'tokens' in question:
+        key_phrases.append('tokens')
+    
+    for phrase in key_phrases:
+        if phrase in help_lower:
+            score += 35  # Major bonus for exact concept matches
+    
+    # TYPE SCORING: Prefer appropriate types for question intent
+    if any(word in question for word in ['how many', 'number', 'count']):
+        if metric_type == 'gauge':
+            score += 25  # Gauges are perfect for current state counts
+        elif metric_type == 'counter':
+            score += 10  # Counters for event counts
+    elif any(word in question for word in ['current', 'what is', 'level']):
+        if metric_type == 'gauge':
+            score += 20  # Gauges for current values
+    elif any(word in question for word in ['p95', 'p99', 'percentile']):
+        if metric_type == 'histogram':
+            score += 25  # Histograms for percentiles
+    
+    # SPECIFICITY SCORING: Prefer core metrics over derived ones
+    if metric_lower.startswith('kube_'):
+        score += 15  # Core Kubernetes metrics
+        
+        # Super specific boosts for perfect matches
+        if 'pod' in question:
+            if 'kube_pod_status_phase' == metric_lower:
+                score += 60  # THE metric for ANY pod status question (running, failing, pending)
+            elif 'kube_pod_info' == metric_lower:
+                score += 40  # Alternative for pod info
+        elif 'service' in question:
+            if 'kube_service_info' == metric_lower:
+                score += 60  # THE metric for service info
+        elif 'node' in question:
+            if 'kube_node_info' == metric_lower:
+                score += 60  # THE metric for node info
+    
+    if metric_lower.startswith('vllm:'):
+        score += 15  # vLLM specific metrics
+        
+        # Specific vLLM metric boosts
+        if 'tokens' in question and 'generation_tokens_total' in metric_lower:
+            score += 50  # Perfect match for token questions
+        elif 'latency' in question and 'e2e_request_latency_seconds' in metric_lower:
+            score += 50  # Perfect match for latency questions
+    
+    if metric_lower.startswith('dcgm_'):
+        score += 15  # GPU specific metrics
+        
+        # Specific DCGM metric boosts  
+        if 'temperature' in question and 'gpu_temp' in metric_lower:
+            score += 60  # Perfect match for GPU temperature
+        elif ('utilization' in question or 'usage' in question) and 'gpu_util' in metric_lower:
+            score += 60  # Perfect match for GPU utilization
+        elif 'power' in question and 'power_usage' in metric_lower:
+            score += 60  # Perfect match for GPU power
+    
+    # ALERTS special handling
+    if 'alert' in question:
+        if metric_lower == 'alerts':
+            score += 70  # THE metric for firing alerts
+        elif 'alertmanager' in metric_lower:
+            score += 20  # Secondary alert metrics
+    
+    # STABILITY SCORING: Prefer stable metrics
+    if '[STABLE]' in help_text:
+        score += 15
+    elif '[ALPHA]' in help_text:
+        score += 5  # Alpha metrics are less preferred
+    
+    # PENALTY: Avoid overly complex derived metrics
+    if len(metric_name.split(':')) > 2:
+        score -= 10  # Penalize complex derived metrics
+    
+    return score
+
+
+def _generate_metadata_driven_promql_simple(metric_name: str, metric_type: str, concepts: Dict[str, Any]) -> str:
+    """Generate PromQL query based on metric type and user intent (simplified)."""
+    intent = concepts.get('intent_type', 'unknown')
+    
+    # Choose aggregation based on intent and metric type
+    if intent == 'count':
+        if metric_type == 'gauge':
+            return f"count({metric_name})"  # Count distinct values for gauges
+        else:
+            return f"sum({metric_name})"    # Sum for counters
+    elif any(measurement in concepts.get('measurements', []) for measurement in ['temperature', 'usage']):
+        return f"avg({metric_name})"  # Average for temperatures and usage
+    elif intent == 'percentile':
+        if metric_type == 'histogram':
+            return f"histogram_quantile(0.95, {metric_name}_bucket)"
+        else:
+            return f"quantile(0.95, {metric_name})"
+    else:
+        # Default based on metric type
+        if metric_type == 'counter':
+            return f"rate({metric_name}[5m])"
+        else:
+            return f"{metric_name}"
