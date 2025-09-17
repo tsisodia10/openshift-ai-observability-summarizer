@@ -33,7 +33,6 @@ sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
 from mcp_client_helper import get_namespaces_mcp, get_models_mcp, get_model_config_mcp, analyze_vllm_mcp, calculate_metrics_mcp, get_vllm_metrics_mcp
 from error_handler import parse_mcp_error, display_mcp_error, display_error_with_context
-from mcp_client_helper import get_namespaces_mcp, get_models_mcp, get_model_config_mcp
 import sys
 import os
 sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'mcp_server'))
