@@ -10,7 +10,6 @@ import base64
 import matplotlib.pyplot as plt
 import io
 import time
-from mcp_server.claude_integration import PrometheusChatBot
 from mcp_client_helper import (
     mcp_client,
     get_namespaces_mcp,
@@ -30,14 +29,15 @@ from mcp_client_helper import (
 # Add current directory to Python path for consistent imports
 import sys
 import os
+sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+
 from mcp_client_helper import get_namespaces_mcp, get_models_mcp, get_model_config_mcp, analyze_vllm_mcp, calculate_metrics_mcp, get_vllm_metrics_mcp
 from error_handler import parse_mcp_error, display_mcp_error, display_error_with_context
 import sys
 import os
-import importlib.util
-
 sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'mcp_server'))
-sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+from mcp_server.claude_integration import PrometheusChatBot
+import importlib.util
 
 # Import PrometheusChatBot using direct file loading to avoid import issues
 # In container: mcp_server is at /app/mcp_server (same level as ui.py)
