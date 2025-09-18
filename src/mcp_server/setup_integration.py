@@ -130,14 +130,14 @@ def generate_claude_config(mcp_stdio_path: str) -> Dict[str, Any]:
                     "MODEL_CONFIG": MODEL_CONFIG_DEFAULT,
                     "THANOS_TOKEN": os.getenv("THANOS_TOKEN", "")
                 },
-                # Add analyze_openshift to autoApprove
+                # Add analyze_openshift
                 "autoApprove": [
                     "list_models",
                     "list_namespaces",
                     "get_model_config",
                     "analyze_vllm",
-                    "analyze_openshift"
                     "search_metrics",
+                    "analyze_openshift",
                     "get_metric_metadata",
                     "get_label_values",
                     "execute_promql",
@@ -150,8 +150,8 @@ def generate_claude_config(mcp_stdio_path: str) -> Dict[str, Any]:
                     "list_namespaces",
                     "get_model_config",
                     "analyze_vllm",
-                    "analyze_openshift"
                     "search_metrics",
+                    "analyze_openshift",
                     "get_metric_metadata",
                     "get_label_values",
                     "execute_promql",
