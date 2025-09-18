@@ -226,7 +226,7 @@ class PrometheusChatBot:
             messages = [{"role": "user", "content": user_question}]
             
             # Let Claude use tools iteratively (like Claude Desktop)
-            max_iterations = 10  # Allow Claude to use multiple tools for comprehensive analysis
+            max_iterations = 20  # Allow Claude to use multiple tools for comprehensive analysis
             iteration = 0
             
             while iteration < max_iterations:

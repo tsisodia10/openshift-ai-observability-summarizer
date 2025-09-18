@@ -802,15 +802,24 @@ elif page == "Chat with Prometheus":
     
     st.sidebar.markdown("---")
     
-    # --- Select LLM ---
-    st.sidebar.markdown("### Select LLM for summarization")
+    # --- Select Claude Model ---
+    st.sidebar.markdown("### 🤖 Select Claude Model")
+    st.sidebar.markdown("*Claude Desktop-powered analysis*")
 
-    # --- Multi-model support ---
-    multi_model_list = get_multi_models()
+    # --- Claude-only model support for Chat with Prometheus ---
+    all_models = get_multi_models()
+    # Filter for only Claude/Anthropic models since this page uses Claude Desktop intelligence
+    claude_models = [model for model in all_models if 'anthropic' in model.lower() or 'claude' in model.lower()]
+    
+    if not claude_models:
+        st.sidebar.error("❌ No Claude models found. Please check model configuration.")
+        claude_models = all_models  # Fallback to all models
+    
     multi_model_name = st.sidebar.selectbox(
-        "Select LLM for summarization",
-        multi_model_list,
-        key="chat_multi_model_selector",
+        "Select Claude model for Prometheus analysis",
+        claude_models,
+        key="chat_claude_model_selector",
+        help="Only Claude models are available for Chat with Prometheus due to superior observability analysis capabilities"
     )
 
     # --- Define model key requirements ---
