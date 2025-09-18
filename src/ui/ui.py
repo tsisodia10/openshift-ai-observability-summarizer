@@ -37,7 +37,7 @@ import sys
 import os
 import importlib.util
 
-# Robust import handling for both local and container environments
+# Claude Desktop Intelligence - Direct import with robust fallbacks
 try:
     # Try direct import first (works in container with proper package structure)
     from mcp_server.claude_integration import PrometheusChatBot
@@ -1305,7 +1305,7 @@ elif page == "Chat with Prometheus":
             st.warning("⚠️ MCP tools connection issue")
     else:
         if current_model_requires_api_key and not user_api_key:
-            st.error("❌ Please set ANTHROPIC_API_KEY environment variable or enter your API key in the sidebar.")
+            st.error("❌ Please enter your Anthropic API key in the sidebar.")
         else:
             st.info("💡 **Smart Time Parsing**: Just mention time naturally in your question! "
                     "Examples: *'past 15 minutes'*, *'last 3 hours'*, *'yesterday'*, *'past 2 weeks'*")
