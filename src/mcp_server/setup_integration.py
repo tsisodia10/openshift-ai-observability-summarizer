@@ -134,6 +134,7 @@ def generate_claude_config(mcp_stdio_path: str) -> Dict[str, Any]:
                     "list_namespaces",
                     "get_model_config",
                     "analyze_vllm",
+                    "analyze_openshift"
                     "search_metrics",
                     "get_metric_metadata",
                     "get_label_values",
@@ -147,6 +148,7 @@ def generate_claude_config(mcp_stdio_path: str) -> Dict[str, Any]:
                     "list_namespaces",
                     "get_model_config",
                     "analyze_vllm",
+                    "analyze_openshift"
                     "search_metrics",
                     "get_metric_metadata",
                     "get_label_values",
