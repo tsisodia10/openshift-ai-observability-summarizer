@@ -35,30 +35,35 @@ from mcp_client_helper import get_namespaces_mcp, get_models_mcp, get_model_conf
 from error_handler import parse_mcp_error, display_mcp_error, display_error_with_context
 import sys
 import os
-sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'mcp_server'))
-from mcp_server.claude_integration import PrometheusChatBot
 import importlib.util
 
-# Import PrometheusChatBot using direct file loading to avoid import issues
-# In container: mcp_server is at /app/mcp_server (same level as ui.py)
-# In local dev: mcp_server is at ../mcp_server (up one level)
-if os.path.exists(os.path.join(os.path.dirname(__file__), 'mcp_server')):
-    # Container path: /app/mcp_server/
-    mcp_server_path = os.path.join(os.path.dirname(__file__), 'mcp_server')
-    src_path = os.path.dirname(__file__)
-else:
-    # Local dev path: ../mcp_server/
-    mcp_server_path = os.path.join(os.path.dirname(__file__), '..', 'mcp_server')
-    src_path = os.path.join(os.path.dirname(__file__), '..')
-
-sys.path.insert(0, mcp_server_path)
-sys.path.insert(0, src_path)
-
-claude_integration_path = os.path.join(mcp_server_path, 'claude_integration.py')
-spec = importlib.util.spec_from_file_location("claude_integration_local", claude_integration_path)
-claude_integration = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(claude_integration)
-PrometheusChatBot = claude_integration.PrometheusChatBot
+# Robust import handling for both local and container environments
+try:
+    # Try direct import first (works in container with proper package structure)
+    from mcp_server.claude_integration import PrometheusChatBot
+except ImportError:
+    # Fallback: Add path and try again (works in local development)
+    sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'mcp_server'))
+    try:
+        from claude_integration import PrometheusChatBot
+    except ImportError:
+        # Final fallback: Direct file loading (most robust)
+        claude_integration_path = os.path.join(os.path.dirname(__file__), '..', 'mcp_server', 'claude_integration.py')
+        if os.path.exists(claude_integration_path):
+            spec = importlib.util.spec_from_file_location("claude_integration", claude_integration_path)
+            claude_integration = importlib.util.module_from_spec(spec)
+            sys.modules['claude_integration'] = claude_integration
+            spec.loader.exec_module(claude_integration)
+            PrometheusChatBot = claude_integration.PrometheusChatBot
+        else:
+            # If all else fails, create a dummy class to prevent crashes
+            class PrometheusChatBot:
+                def __init__(self, *args, **kwargs):
+                    self.error = "Claude integration not available"
+                def chat(self, *args, **kwargs):
+                    return "❌ Claude integration not available. Please check deployment."
+                def test_connection(self):
+                    return False
 
 # --- Config ---
 API_URL = os.getenv("METRICS_API_URL", "http://localhost:8000")
