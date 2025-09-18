@@ -180,47 +180,27 @@ class PrometheusChatBot:
     def _route_tool_call_to_mcp(self, tool_name: str, arguments: Dict[str, Any]) -> str:
         """Route Claude's tool call to our MCP server."""
         try:
-            # Call MCP tools directly (no client helper - pure server-side)
-            from .tools.prometheus_tools import (
-                search_metrics, get_metric_metadata, get_label_values, 
-                execute_promql, explain_results, suggest_queries,
-                select_best_metric, find_best_metric_with_metadata_v2,
-                find_best_metric_with_metadata
-            )
+            # Import MCP client helper to call our tools
+            import sys
+            ui_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'ui')
+            if ui_path not in sys.path:
+                sys.path.insert(0, ui_path)
             
-            # Route to the appropriate tool function directly
-            if tool_name == "search_metrics":
-                result = search_metrics(arguments.get("pattern", ""))
-            elif tool_name == "get_metric_metadata":
-                result = get_metric_metadata(arguments.get("metric_name", ""))
-            elif tool_name == "get_label_values":
-                result = get_label_values(
-                    arguments.get("metric_name", ""),
-                    arguments.get("label_name", "")
-                )
-            elif tool_name == "execute_promql":
-                result = execute_promql(arguments.get("query", ""))
-            elif tool_name == "explain_results":
-                result = explain_results(
-                    arguments.get("query", ""),
-                    arguments.get("results", []),
-                    arguments.get("result_type", "vector")
-                )
-            elif tool_name == "suggest_queries":
-                result = suggest_queries(arguments.get("user_intent", ""))
-            elif tool_name == "select_best_metric":
-                result = select_best_metric(
-                    arguments.get("user_intent", ""),
-                    arguments.get("available_metrics", [])
-                )
-            elif tool_name == "find_best_metric_with_metadata_v2":
-                result = find_best_metric_with_metadata_v2(arguments.get("question", ""))
-            elif tool_name == "find_best_metric_with_metadata":
-                result = find_best_metric_with_metadata(arguments.get("question", ""))
-            else:
-                return f"Unknown tool: {tool_name}"
+            try:
+                from mcp_client_helper import MCPClientHelper
+            except ImportError:
+                # Load mcp_client_helper directly
+                mcp_helper_path = os.path.join(ui_path, 'mcp_client_helper.py')
+                spec = importlib.util.spec_from_file_location("mcp_client_helper", mcp_helper_path)
+                mcp_helper = importlib.util.module_from_spec(spec)
+                spec.loader.exec_module(mcp_helper)
+                MCPClientHelper = mcp_helper.MCPClientHelper
             
-            # Return the result
+            mcp_client = MCPClientHelper()
+            
+            # Call the tool via MCP
+            result = mcp_client.call_tool_sync(tool_name, arguments)
+            
             if result and len(result) > 0:
                 return result[0]['text']
             else:
