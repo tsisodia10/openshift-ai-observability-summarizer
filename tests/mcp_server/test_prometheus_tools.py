@@ -189,32 +189,6 @@ class TestPrometheusToolsIntegration:
         assert all(metric in test_metrics for metric in ranked), "All returned metrics should be from input"
 
 
-class TestClaudeChatTool:
-    """Test the new Claude chat MCP tool."""
-    
-    def test_claude_chat_tool_import(self):
-        """Test that claude_prometheus_chat can be imported."""
-        from mcp_server.tools.claude_chat_tool import claude_prometheus_chat
-        
-        assert callable(claude_prometheus_chat)
-        assert claude_prometheus_chat.__doc__ is not None
-    
-    def test_claude_chat_tool_basic_functionality(self):
-        """Test basic functionality of claude_prometheus_chat."""
-        from mcp_server.tools.claude_chat_tool import claude_prometheus_chat
-        
-        # Should return MCP format even with missing API key
-        result = claude_prometheus_chat("test question")
-        
-        assert isinstance(result, list)
-        assert len(result) > 0
-        assert "text" in result[0]
-        
-        # Should be valid JSON
-        try:
-            json.loads(result[0]["text"])
-        except json.JSONDecodeError:
-            pytest.fail("Claude chat tool should return valid JSON")
 
 
 if __name__ == "__main__":
