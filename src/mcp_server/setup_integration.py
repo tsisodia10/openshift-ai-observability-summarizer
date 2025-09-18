@@ -74,16 +74,17 @@ def get_mcp_stdio_executable(project_root: Path) -> str:
     venv_path = find_virtual_env(project_root)
     if not venv_path:
         print("⚠️  Warning: Virtual environment not found, using system Python")
-        return "python3"
+        return "obs-mcp-stdio"
     
-    # Use python3 from venv + stdio_server.py directly
+    # Use obs-mcp-stdio executable from venv
     if platform.system() == "Windows":
-        python_exe = venv_path / "Scripts" / "python.exe"
+        executable = venv_path / "Scripts" / "obs-mcp-stdio.exe"
+        if not executable.exists():
+            executable = venv_path / "Scripts" / "obs-mcp-stdio"
     else:
-        python_exe = venv_path / "bin" / "python3"
+        executable = venv_path / "bin" / "obs-mcp-stdio"
     
-    stdio_script = project_root / "src" / "mcp_server" / "stdio_server.py"
-    return f"{python_exe} {stdio_script}"
+    return str(executable)
 
 
 def get_claude_config_path() -> Path:
