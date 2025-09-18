@@ -22,7 +22,7 @@ def test_observability_mcp_server_registers_tools_and_reconfigures(
     MockFastMCP.return_value = mcp_instance
 
     # Act
-    from mcp_server.mcp import ObservabilityMCPServer
+    from mcp_server.observability_mcp import ObservabilityMCPServer
 
     server = ObservabilityMCPServer()
 
@@ -35,7 +35,7 @@ def test_observability_mcp_server_registers_tools_and_reconfigures(
 
 @patch("fastmcp.FastMCP", side_effect=RuntimeError("boom"))
 def test_observability_mcp_server_init_failure_propagates(_):
-    from mcp_server.mcp import ObservabilityMCPServer
+    from mcp_server.observability_mcp import ObservabilityMCPServer
     import pytest
 
     with pytest.raises(RuntimeError, match="boom"):
