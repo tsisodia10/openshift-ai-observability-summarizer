@@ -67,7 +67,7 @@ METRICS_UI_CHART_PATH ?= ui
 MCP_SERVER_RELEASE_NAME ?= mcp-server
 MCP_SERVER_CHART_PATH ?= mcp-server
 TOLERATIONS_TEMPLATE=[{"key":"$(1)","effect":"NoSchedule","operator":"Exists"}]
-GEN_MODEL_CONFIG_PREFIX = "/tmp/gen_model_config"
+GEN_MODEL_CONFIG_PREFIX = /tmp/gen_model_config
 
 # Unified model configuration map
 # Load model configuration from separate JSON file
