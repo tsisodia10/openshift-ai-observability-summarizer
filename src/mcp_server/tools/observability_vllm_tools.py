@@ -17,14 +17,22 @@ import pandas as pd
 from typing import Dict, Any, List, Optional
 
 # Import core observability services
-from core.metrics import get_models_helper, get_namespaces_helper, get_vllm_metrics, fetch_metrics
+from core.metrics import (
+    get_models_helper,
+    get_namespaces_helper,
+    get_vllm_metrics,
+    fetch_metrics,
+    get_summarization_models,
+    get_cluster_gpu_info,
+    get_namespace_model_deployment_info,
+)
 from core.llm_client import build_prompt, summarize_with_llm, extract_time_range_with_info
 from core.models import AnalyzeRequest
 from core.response_validator import ResponseType
 from core.metrics import NAMESPACE_SCOPED, CLUSTER_WIDE
 from core.config import PROMETHEUS_URL, THANOS_TOKEN, VERIFY_SSL, DEFAULT_TIME_RANGE_DAYS
 import requests
-from datetime import datetime
+from datetime import datetime, timedelta
 
 # Import structured logger from MCP server utilities
 from common.pylogger import get_python_logger
@@ -471,5 +479,56 @@ def calculate_metrics(
             message=f"Failed to calculate metrics: {str(e)}",
             error_code=MCPErrorCode.DATA_PROCESSING_ERROR,
             recovery_suggestion="Check the metrics data format and try again."
+        )
+        return error.to_mcp_response()
+
+
+def list_summarization_models() -> List[Dict[str, Any]]:
+    """List available summarization models, including internal and external models."""
+    try:
+        models = get_summarization_models()
+        if not models:
+            return _resp("No summarization models configured.")
+        content_lines = [f"• {name}" for name in models]
+        content = f"Available Summarization Models ({len(models)} total):\n\n" + "\n".join(content_lines)
+        return _resp(content)
+    except Exception as e:
+        error = MCPException(
+            message=f"Failed to list summarization models: {str(e)}",
+            error_code=MCPErrorCode.CONFIGURATION_ERROR,
+            recovery_suggestion="Ensure model configuration is valid."
+        )
+        return error.to_mcp_response()
+
+
+def get_gpu_info() -> List[Dict[str, Any]]:
+    """Get GPU information."""
+    try:
+        info = get_cluster_gpu_info()
+        return _resp(json.dumps(info))
+    except Exception as e:
+        error = MCPException(
+            message=f"Failed to get GPU info: {str(e)}",
+            error_code=MCPErrorCode.PROMETHEUS_ERROR,
+            recovery_suggestion="Verify Prometheus/Thanos connectivity and DCGM exporter availability."
+        )
+        return error.to_mcp_response()
+
+
+def get_deployment_info(namespace: str, model: str) -> List[Dict[str, Any]]:
+    """Get deployment info for a model in a namespace."""
+    try:
+        validate_required_params(namespace=namespace, model=model)
+    except ValidationError as e:
+        return e.to_mcp_response()
+
+    try:
+        payload = get_namespace_model_deployment_info(namespace, model)
+        return _resp(json.dumps(payload))
+    except Exception as e:
+        error = MCPException(
+            message=f"Failed to get deployment info: {str(e)}",
+            error_code=MCPErrorCode.PROMETHEUS_ERROR,
+            recovery_suggestion="Verify Prometheus/Thanos connectivity and metric availability."
         )
         return error.to_mcp_response()
