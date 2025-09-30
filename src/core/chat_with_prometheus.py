@@ -55,7 +55,7 @@ def make_prometheus_request(endpoint: str, params: Optional[Dict] = None) -> Dic
 
 
 # =============================================================================
-# Metric Discovery and Search Functions
+# Metric Discovery and Search Functions (case insensitive)
 # =============================================================================
 
 def search_metrics_by_pattern(pattern: str = "", limit: int = 50) -> Dict[str, Any]:
