@@ -887,6 +887,42 @@ def parse_model_config_text(text: str) -> Dict[str, Any]:
         return {}
 
 
+def chat_tempo_mcp(question: str) -> Dict[str, Any]:
+    """
+    Chat with Tempo traces using MCP tools.
+    
+    Args:
+        question: Natural language question about traces (time range extracted automatically)
+    
+    Returns:
+        Tempo chat analysis results
+    """
+    try:
+        logger.debug(f"Chatting with Tempo: {question}")
+        logger.debug(f"Calling chat_tempo_tool with question: {question}")
+        
+        result = mcp_client.call_tool_sync("chat_tempo_tool", {
+            "question": question
+        })
+        
+        logger.debug(f"chat_tempo_tool result: {result}")
+        
+        logger.debug("Tempo chat completed successfully")
+        return {
+            "status": "success",
+            "data": result,
+            "question": question
+        }
+        
+    except Exception as e:
+        logger.error(f"Tempo chat MCP call failed: {e}")
+        return {
+            "status": "error",
+            "error": str(e),
+            "question": question
+        }
+
+
 def chat_openshift_mcp(
     metric_category: str,
     question: str,
