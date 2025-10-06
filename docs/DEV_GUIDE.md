@@ -74,27 +74,37 @@ export DYLD_FALLBACK_LIBRARY_PATH=/opt/homebrew/lib:$DYLD_FALLBACK_LIBRARY_PATH
 
 ### Local Development
 ```bash
-# Set up port-forwarding to cluster services
+# Set up port-forwarding to cluster services (default LLM: llama-3.2-3b-instruct)
 ./scripts/local-dev.sh -n <DEFAULT_NAMESPACE>
+
+# With specific LLM model (optional)
+./scripts/local-dev.sh -n <DEFAULT_NAMESPACE> -l llama-3.1-8b-instruct
 
 # If model is in different namespace:
 ./scripts/local-dev.sh -n <DEFAULT_NAMESPACE> -m <MODEL_NAMESPACE>
 
+# Use cluster config instead of generating new one:
+./scripts/local-dev.sh -n <DEFAULT_NAMESPACE> -c cluster
+
 # This script sets up:
 # - Virtual environment activation (.venv)
+# - MODEL_CONFIG generation (merges base models + specified LLM)
 # - Port-forwarding to Llamastack (localhost:8321)
 # - Port-forwarding to Model service (localhost:8080)
 # - Port-forwarding to Thanos (localhost:9090)
-# - Metrics API (localhost:8000)
+# - MCP Server (localhost:8085)
 # - Streamlit UI (localhost:8501)
 
-# Example:
-./scripts/local-dev.sh -n default-ns
-./scripts/local-dev.sh -n default-ns -m model-ns  # Model in different namespace
+# Examples:
+./scripts/local-dev.sh -n default-ns                      # Default LLM
+./scripts/local-dev.sh -n default-ns -l llama-3.1-8b-instruct  # Custom LLM
+./scripts/local-dev.sh -n default-ns -m model-ns          # Model in different namespace
+./scripts/local-dev.sh -n default-ns -c cluster           # Use cluster config
 ```
 
 **Note**: The script automatically:
 - Activates Python virtual environment if `.venv` exists
+- Generates MODEL_CONFIG by merging base external models (OpenAI, Google, Anthropic) with your specified LLM
 - Uses service-based port forwarding for better reliability
 - Supports separate namespaces for different services
 
@@ -298,6 +308,95 @@ Common models include:
 - `llama-3-3-70b-instruct`
 - `llama-guard-3-8b` (safety model)
 
+### Model Configuration Generation
+
+**Location**: `scripts/generate-model-config.sh`
+
+**Purpose**: Single source of truth for dynamically generating model configurations. Used by both Makefile (OpenShift deployment) and local-dev.sh (local development).
+
+**Architecture**:
+```
+generate-model-config.sh
+├── Used by Makefile (with --helm-format flag)
+│   └── Generates: JSON + Helm YAML values file
+└── Used by local-dev.sh (without flag)
+    └── Generates: JSON only
+```
+
+**How it works**:
+1. **Template Substitution**: Reads `deploy/helm/default-model.json.template` and substitutes:
+   - `$MODEL_ID` → Full model path (e.g., `meta-llama/Llama-3.2-3B-Instruct`)
+   - `$MODEL_NAME` → Service name (e.g., `llama-3-2-3b-instruct`)
+
+2. **JSON Merging**: Merges the LLM-specific config with base external models from `deploy/helm/model-config.json`:
+   ```bash
+   jq -s '.[0] * .[1]' new_model_config.json model-config.json > final_config.json
+   ```
+
+3. **Export**: Sets `MODEL_CONFIG` environment variable for use by services
+
+**Parameters**:
+- **LLM model name** (optional): Model identifier (default: `llama-3-2-3b-instruct`)
+- **`--helm-format` flag** (optional): Generate Helm values YAML file in addition to JSON
+
+**Output Files** (in `/tmp`):
+- `gen_model_config-list_models_output.txt` - Available models from Helm chart
+- `gen_model_config-final_config.json` - Merged JSON configuration
+- `gen_model_config-for_helm.yaml` - Helm values format (only with `--helm-format`)
+
+**Usage Examples**:
+```bash
+# Direct usage (for debugging/testing)
+source scripts/generate-model-config.sh
+generate_model_config                                    # Use default model
+generate_model_config "llama-3.1-8b-instruct"           # Specific model, JSON only
+generate_model_config "llama-3.2-3b-instruct" --helm-format  # JSON + Helm YAML
+
+# Automatic usage via Makefile
+make install NAMESPACE=your-ns LLM=llama-3.1-8b-instruct
+# → Calls: generate_model_config "llama-3.1-8b-instruct" --helm-format
+
+# Automatic usage via local-dev.sh
+./scripts/local-dev.sh -n your-ns -l llama-3.1-8b-instruct
+# → Calls: generate_model_config "llama-3.1-8b-instruct" (no --helm-format)
+```
+
+**Example: Config Merging Process**:
+```bash
+# 1. Template (default-model.json.template)
+{
+  "$MODEL_ID": {
+    "external": false,
+    "requiresApiKey": false,
+    "serviceName": "$MODEL_NAME"
+  }
+}
+
+# 2. After substitution (new_model_config.json)
+{
+  "meta-llama/Llama-3.2-3B-Instruct": {
+    "external": false,
+    "requiresApiKey": false,
+    "serviceName": "llama-3-2-3b-instruct"
+  }
+}
+
+# 3. Base config (model-config.json)
+{
+  "openai/gpt-4o-mini": { ... },
+  "google/gemini-2.5-flash": { ... },
+  "anthropic/claude-sonnet-4-20250514": { ... }
+}
+
+# 4. Final merged config (final_config.json)
+{
+  "meta-llama/Llama-3.2-3B-Instruct": { ... },  # ← LLM-specific
+  "openai/gpt-4o-mini": { ... },                 # ← Base external models
+  "google/gemini-2.5-flash": { ... },
+  "anthropic/claude-sonnet-4-20250514": { ... }
+}
+```
+
 ## 🔍 Common Development Patterns
 
 ### Adding New Metrics
@@ -380,11 +479,28 @@ make uninstall NAMESPACE=test-namespace
 ### Port Forwarding
 ```bash
 # Manual port-forwarding (if script fails)
-# Note: Replace <pod-name> with actual pod names from 'oc get pods'
-oc port-forward pod/<thanos-pod-name> 9090:9090 -n openshift-monitoring &
-oc port-forward pod/<llamastack-pod-name> 8321:8321 -n <DEFAULT_NAMESPACE> &
-oc port-forward service/<model-service-name> 8080:8080 -n <MODEL_NAMESPACE> &
+
+# Thanos querier (pod-based, use head -1 since multiple pods may exist)
+THANOS_POD=$(oc get pods -n openshift-monitoring -o name -l 'app.kubernetes.io/component=query-layer,app.kubernetes.io/instance=thanos-querier' | head -1)
+oc port-forward $THANOS_POD 9090:9090 -n openshift-monitoring &
+
+# LlamaStack (service-based)
+LLAMASTACK_SERVICE=$(oc get services -n <DEFAULT_NAMESPACE> -o name -l 'app.kubernetes.io/instance=rag, app.kubernetes.io/name=llamastack')
+oc port-forward $LLAMASTACK_SERVICE 8321:8321 -n <DEFAULT_NAMESPACE> &
+
+# Llama Model service (service-based)
+LLAMA_MODEL_SERVICE=$(oc get services -n <MODEL_NAMESPACE> -o name -l 'app=isvc.llama-3-2-3b-instruct-predictor')
+oc port-forward $LLAMA_MODEL_SERVICE 8080:8080 -n <MODEL_NAMESPACE> &
+
+# Tempo gateway (service-based)
+TEMPO_SERVICE=$(oc get services -n observability-hub -o name -l 'app.kubernetes.io/name=tempo,app.kubernetes.io/component=gateway')
+oc port-forward $TEMPO_SERVICE 8082:8080 -n observability-hub &
 ```
+
+**Note**:
+- Thanos uses pod-based forwarding with `head -1` because multiple thanos-querier pods may exist
+- Other services use service-based forwarding for better reliability
+- Replace `<DEFAULT_NAMESPACE>` and `<MODEL_NAMESPACE>` with your actual namespaces
 
 ### Logs
 ```bash

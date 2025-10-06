@@ -30,13 +30,15 @@ usage() {
     echo "  -n/-N NAMESPACE              Default namespace for pods (required)"
     echo "  -m/-M NAMESPACE              Llama Model namespace (optional, use if model is in different namespace)"
     echo "  -c/-C CONFIG                 Model config source: 'local' or 'cluster' (default: local)"
+    echo "  -l/-L LLM_MODEL              LLM model to generate config for (default: llama-3.2-3b-instruct, only used with -c local)"
     echo ""
     echo "Examples:"
-    echo "  $0 -n default-ns                       # All pods/services in same namespace, use local config"
-    echo "  $0 -N default-ns                       # All pods/services in same namespace (uppercase), use local config"
-    echo "  $0 -n default-ns -m model-ns           # Model in different namespace than other pods/services, use local config"
+    echo "  $0 -n default-ns                       # Use local config with default LLM (llama-3.2-3b-instruct)"
+    echo "  $0 -N default-ns                       # Same as above (uppercase option)"
+    echo "  $0 -n default-ns -m model-ns           # Model in different namespace, use default LLM"
     echo "  $0 -n default-ns -c cluster            # Use cluster model config instead of local"
-    echo "  $0 -n default-ns -C local              # Explicitly use local model config (default)"
+    echo "  $0 -n default-ns -l llama-3.2-1b-instruct  # Generate config for llama-3.2-1b-instruct"
+    echo "  $0 -n default-ns -l llama-3.1-8b-instruct  # Generate config for llama-3.1-8b-instruct"
 }
 
 # Function to parse command line arguments
@@ -50,15 +52,18 @@ parse_args() {
     DEFAULT_NAMESPACE=""
     LLAMA_MODEL_NAMESPACE=""
     MODEL_CONFIG_SOURCE="local"  # Default to local
+    LLM_MODEL=""  # Optional LLM model for config generation
 
     # Parse standard arguments using getopts
-    while getopts "n:N:m:M:c:C:" opt; do
+    while getopts "n:N:m:M:c:C:l:L:" opt; do
         case $opt in
             n|N) DEFAULT_NAMESPACE="$OPTARG"
                  ;;
             m|M) LLAMA_MODEL_NAMESPACE="$OPTARG"
                  ;;
             c|C) MODEL_CONFIG_SOURCE="$OPTARG"
+                 ;;
+            l|L) LLM_MODEL="$OPTARG"
                  ;;
             *) echo -e "${RED}❌ INVALID option: [$OPTARG]${NC}"
                usage
@@ -141,56 +146,44 @@ check_prerequisites() {
     echo -e "${GREEN}✅ Prerequisites check passed${NC}"
 }
 
+# Helper function to create port-forward command
+create_port_forward() {
+    local resource_name="$1"
+    local local_port="$2"
+    local remote_port="$3"
+    local namespace="$4"
+    local description="$5"
+    local emoji="$6"
+
+    # Check if resource name is found
+    if [ -z "$resource_name" ]; then
+        echo -e "${YELLOW}⚠️  $description resource NOT found in $namespace namespace. Exiting...${NC}"
+        exit 1
+    fi
+    
+    # Create port-forward
+    oc port-forward "$resource_name" "$local_port:$remote_port" -n "$namespace" >/dev/null 2>&1 &
+    echo -e "${GREEN}✅ Found $description: $emoji (resource: $resource_name, namespace: $namespace) available at: http://localhost:$local_port${NC}"
+}
+
 # Function to find and start port forwards
 start_port_forwards() {
     echo -e "${BLUE}🔍 Finding pods and starting port-forwards...${NC}"
-    
-    # Find Thanos pod
-    THANOS_POD=$(oc get pods -n "$PROMETHEUS_NAMESPACE" -o name | grep thanos-querier | head -1 | cut -d'/' -f2 || echo "")
-    if [ -z "$THANOS_POD" ]; then
-        THANOS_POD=$(oc get pods -n "$PROMETHEUS_NAMESPACE" -o name | grep prometheus | head -1 | cut -d'/' -f2 || echo "")
-    fi
-    
-    if [ -n "$THANOS_POD" ]; then
-        echo -e "${GREEN}✅ Found Thanos pod: $THANOS_POD${NC}"
-        oc port-forward pod/"$THANOS_POD" "$THANOS_PORT:9090" -n "$PROMETHEUS_NAMESPACE" >/dev/null 2>&1 &
-        echo -e "${GREEN}   📊 Thanos available at: http://localhost:$THANOS_PORT${NC}"
-    else
-        echo -e "${RED}❌ No Thanos/Prometheus pod found${NC}"
-        exit 1
-    fi
+
+    THANOS_POD=$(oc get pods -n "$PROMETHEUS_NAMESPACE" -o name -l 'app.kubernetes.io/component=query-layer,app.kubernetes.io/instance=thanos-querier' | head -1)
+    create_port_forward "$THANOS_POD" "$THANOS_PORT" "9090" "$PROMETHEUS_NAMESPACE" "Thanos" "📊"
     
     # Find LlamaStack pod
-    LLAMASTACK_POD=$(oc get pods -n "$DEFAULT_NAMESPACE" -o name | grep -E "(llama-stack|llamastack)" | head -1 | cut -d'/' -f2 || echo "")
-    if [ -n "$LLAMASTACK_POD" ]; then
-        echo -e "${GREEN}✅ Found LlamaStack pod: $LLAMASTACK_POD${NC}"
-        oc port-forward pod/"$LLAMASTACK_POD" "$LLAMASTACK_PORT:8321" -n "$DEFAULT_NAMESPACE" >/dev/null 2>&1 &
-        echo -e "${GREEN}   🦙 LlamaStack available at: http://localhost:$LLAMASTACK_PORT${NC}"
-    else
-        echo -e "${RED}❌  LlamaStack pod not found. Exiting...${NC}"
-        exit 1
-    fi
+    LLAMASTACK_SERVICE=$(oc get services -n "$DEFAULT_NAMESPACE" -o name -l 'app.kubernetes.io/instance=rag, app.kubernetes.io/name=llamastack')
+    create_port_forward "$LLAMASTACK_SERVICE" "$LLAMASTACK_PORT" "8321" "$DEFAULT_NAMESPACE" "LlamaStack" "🦙"
     
     # Find Llama Model service
-    LLAMA_MODEL_SERVICE=$(oc get services -n "$LLAMA_MODEL_NAMESPACE" -o name | grep -E "(llama-3|predictor)" | grep -v stack | head -1 | cut -d'/' -f2 || echo "")
-    if [ -n "$LLAMA_MODEL_SERVICE" ]; then
-        echo -e "${GREEN}✅ Found Llama Model service: $LLAMA_MODEL_SERVICE in [$LLAMA_MODEL_NAMESPACE] namespace${NC}"
-        oc port-forward service/"$LLAMA_MODEL_SERVICE" "$LLAMA_MODEL_PORT:8080" -n "$LLAMA_MODEL_NAMESPACE" >/dev/null 2>&1 &
-        echo -e "${GREEN}   🤖 Llama Model available at: http://localhost:$LLAMA_MODEL_PORT${NC}"
-    else
-        echo -e "${RED}❌  Llama Model service not found in namespace: $LLAMA_MODEL_NAMESPACE. Exiting...${NC}"
-        exit 1
-    fi
+    LLAMA_MODEL_SERVICE=$(oc get services -n "$LLAMA_MODEL_NAMESPACE" -o name -l "serving.kserve.io/inferenceservice=$LLM_MODEL, component=predictor")
+    create_port_forward "$LLAMA_MODEL_SERVICE" "$LLAMA_MODEL_PORT" "8080" "$LLAMA_MODEL_NAMESPACE" "Llama Model" "🤖"
     
     # Find Tempo gateway service
-    TEMPO_SERVICE=$(oc get services -n "$OBSERVABILITY_NAMESPACE" -o name -l 'app.kubernetes.io/name=tempo,app.kubernetes.io/component=gateway' | cut -d'/' -f2 || echo "")
-    if [ -n "$TEMPO_SERVICE" ]; then
-        echo -e "${GREEN}✅ Found Tempo gateway service: $TEMPO_SERVICE${NC}"
-        oc port-forward service/"$TEMPO_SERVICE" "$TEMPO_PORT:8080" -n "$OBSERVABILITY_NAMESPACE" >/dev/null 2>&1 &
-        echo -e "${GREEN}   🔍 Tempo available at: https://localhost:$TEMPO_PORT${NC}"
-    else
-        echo -e "${YELLOW}⚠️  Tempo gateway service not found - trace functionality will NOT be available${NC}"
-    fi
+    TEMPO_SERVICE=$(oc get services -n "$OBSERVABILITY_NAMESPACE" -o name -l 'app.kubernetes.io/name=tempo,app.kubernetes.io/component=gateway')
+    create_port_forward "$TEMPO_SERVICE" "$TEMPO_PORT" "8080" "$OBSERVABILITY_NAMESPACE" "Tempo" "🔍"
 
     sleep 3  # Give port-forwards time to establish
 }
@@ -215,34 +208,20 @@ ensure_port_free() {
     fi
 }
 
-# This function sets "MODEL_CONFIG" environment variable from local file
+# This function sets "MODEL_CONFIG" environment variable from cluster deployment or dynamically generated config
 set_model_config() {
-    echo -e "${BLUE}🔧 Setting up MODEL_CONFIG...${NC}"
-    echo -e "${BLUE}   Using config source: $MODEL_CONFIG_SOURCE${NC}"
-
     if [ "$MODEL_CONFIG_SOURCE" = "local" ]; then
-        # Use local model config
-        LOCAL_MODEL_CONFIG="deploy/helm/model-config.json"
-        if [ -f "$LOCAL_MODEL_CONFIG" ]; then
-            echo -e "${YELLOW}📋 Using LOCAL model config from: $LOCAL_MODEL_CONFIG${NC}"
-            echo -e "${YELLOW}   This includes additional models like Anthropic Claude for testing.${NC}"
-            export MODEL_CONFIG=$(cat "$LOCAL_MODEL_CONFIG")
-            if [ -n "$MODEL_CONFIG" ]; then
-                echo -e "${GREEN}✅ LOCAL MODEL_CONFIG loaded successfully${NC}"
-                echo -e "${BLUE}   Available models: $(echo "$MODEL_CONFIG" | jq -r 'keys | join(", ")')${NC}"
-                return 0
-            else
-                echo -e "${RED}❌ Failed to read local model config file${NC}"
-                exit 1
-            fi
+        # Generate model config dynamically (LLM_MODEL is optional, will use default if not specified)
+        # Script is already sourced in main(), just call the function
+        if generate_model_config "$LLM_MODEL"; then
+            return 0
         else
-            echo -e "${RED}❌ Local model config file not found: $LOCAL_MODEL_CONFIG${NC}"
-            echo -e "${YELLOW}   Please ensure the file exists or use cluster config with -c cluster${NC}"
+            echo -e "${RED}❌ Failed to generate MODEL_CONFIG${NC}"
             exit 1
         fi
     else
         # Use cluster config
-        echo -e "${BLUE}🔧 Using CLUSTER model config...${NC}"
+        echo -e "${BLUE}🔧 Setting up MODEL_CONFIG from cluster...${NC}"
         local MCP_SERVER_APP="mcp-server-app"
         MCP_SERVER_APP_DEPLOYMENT=$(oc get deploy $MCP_SERVER_APP -n "$DEFAULT_NAMESPACE" 2>/dev/null)
         if [ -n "$MCP_SERVER_APP_DEPLOYMENT" ]; then
@@ -289,23 +268,6 @@ start_local_services() {
     export DYLD_FALLBACK_LIBRARY_PATH="/opt/homebrew/lib:$DYLD_FALLBACK_LIBRARY_PATH"
 
     set_model_config
-    
-    # Start Metrics API backend
-    echo -e "${BLUE}🔧 Starting Metrics API backend...${NC}"
-    ensure_port_free "$METRICS_API_PORT"
-    (cd src/api && PYTHON_LOG_LEVEL="$PYTHON_LOG_LEVEL" python3 -m uvicorn metrics_api:app --host 0.0.0.0 --port $METRICS_API_PORT --reload > /tmp/summarizer-metrics-api.log 2>&1) &
-    MCP_PID=$!
-    
-    # Wait for Metrics API to start
-    sleep 3
-    
-    # Test Metrics API service
-    if curl -s --connect-timeout 5 "http://localhost:$METRICS_API_PORT/models" > /dev/null; then
-        echo -e "${GREEN}✅ Metrics API backend started successfully${NC}"
-    else
-        echo -e "${RED}❌ Metrics API backend failed to start${NC}"
-        exit 1
-    fi
 
     # Start MCP server (HTTP transport)
     echo -e "${BLUE}🧩 Starting MCP Server (HTTP)...${NC}"
@@ -362,6 +324,9 @@ main() {
     parse_args "$@"
     check_prerequisites
 
+    # Source the shared script once (for model config generation and default model)
+    source scripts/generate-model-config.sh
+
     # Set cleanup trap only after successful prerequisite checks
     trap cleanup EXIT INT TERM
 
@@ -371,6 +336,13 @@ main() {
     echo -e "${BLUE}  DEFAULT_NAMESPACE: $DEFAULT_NAMESPACE${NC}"
     echo -e "${BLUE}  LLAMA_MODEL_NAMESPACE: $LLAMA_MODEL_NAMESPACE${NC}"
     echo -e "${BLUE}  MODEL_CONFIG_SOURCE: $MODEL_CONFIG_SOURCE${NC}"
+    if [ "$MODEL_CONFIG_SOURCE" = "local" ]; then
+        if [ -n "$LLM_MODEL" ]; then
+            echo -e "${BLUE}  LLM_MODEL: $LLM_MODEL${NC}"
+        else
+            echo -e "${BLUE}  LLM_MODEL: $(get_default_model) (default)${NC}"
+        fi
+    fi
     echo -e "${BLUE}--------------------------------${NC}\n"
 
     start_port_forwards
