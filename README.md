@@ -130,7 +130,7 @@ make uninstall NAMESPACE=your-namespace
 
 ### References
 
-* Refer to [DEVELOPER_INSIGHTS]() for more insightful information of this project
+* Refer to [DEVELOPER_INSIGHTS](https://github.com/rh-ai-quickstart/openshift-ai-observability-summarizer/blob/ddaa513143ad92c07df94dd873ed2ea5f87f55d0/DEVELOPER_INSIGHTS.md#:~:text=CONTRIBUTING.md-,DEVELOPER_INSIGHTS,-.md) for more insightful information of this project
 * Built on [Prometheus](https://prometheus.io/) and [Thanos](https://thanos.io/) for metrics collection
 * Uses [vLLM](https://github.com/vllm-project/vllm) for model serving
 * Powered by [Streamlit](https://streamlit.io/) for the web interface
