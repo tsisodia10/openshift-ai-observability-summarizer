@@ -3,7 +3,7 @@
 
 # NAMESPACE validation for deployment targets
 ifeq ($(NAMESPACE),)
-ifeq (,$(filter install-local depend install-ingestion-pipeline list-models% generate-model-config help build build-ui build-alerting build-mcp-server push push-ui push-alerting push-mcp-server install-observability-stack uninstall-observability-stack clean config test,$(MAKECMDGOALS)))
+ifeq (,$(filter install-local depend install-ingestion-pipeline list-models% generate-model-config help build build-ui build-alerting build-mcp-server push push-ui push-alerting push-mcp-server uninstall-observability-stack clean config test check-observability-drift,$(MAKECMDGOALS)))
 $(error NAMESPACE is not set)
 endif
 endif
@@ -14,7 +14,7 @@ MAKEFLAGS += --no-print-directory
 REGISTRY ?= quay.io
 ORG ?= ecosystem-appeng
 IMAGE_PREFIX ?= aiobs
-VERSION ?= 0.13.3
+VERSION ?= 0.14.2
 PLATFORM ?= linux/amd64
 
 # Container image names
@@ -168,12 +168,14 @@ help:
 	@echo "  install-ingestion-pipeline - Install extra ingestion pipelines"
 	@echo ""
 	@echo "Observability Stack:"
-	@echo "  install-observability-stack - Install complete observability stack (MinIO + TempoStack + OTEL + tracing)"
+	@echo "  install-observability-stack - Install complete observability stack (MinIO + TempoStack + OTEL + tracing + drift check)"
 	@echo "  uninstall-observability-stack - Uninstall complete observability stack (tracing + TempoStack + OTEL + MinIO)"
 	@echo ""
 	@echo "Individual Components:"
 	@echo "  install-observability - Install TempoStack and OTEL Collector only"
 	@echo "  uninstall-observability - Uninstall TempoStack and OTEL Collector only"
+	@echo "  upgrade-observability - Force upgrade observability components (even if already installed)"
+	@echo "  check-observability-drift - Check for configuration drift in observability-hub"
 	@echo "  setup-tracing - Enable auto-instrumentation for tracing in target namespace (idempotent)"
 	@echo "  remove-tracing - Disable auto-instrumentation for tracing in target namespace"
 	@echo "  install-minio - Install MinIO observability storage backend only"
@@ -301,8 +303,8 @@ install-metric-ui: namespace
 .PHONY: install-mcp-server
 install-mcp-server: namespace
 	@echo "Deploying MCP Server"
-	@echo "Generating model configuration for MCP Server (LLM=$(LLM)) if provided..."
-	@$(if $(LLM),$(MAKE) generate-model-config LLM=$(LLM),echo "LLM not set; skipping model config generation")
+	@echo "Generating model configuration for MCP Server (LLM=$(LLM))"
+	@$(MAKE) generate-model-config LLM=$(LLM)
 	@echo "  → [$(GEN_MODEL_CONFIG_PREFIX).output] contains the model config generation output"
 	@echo "Checking ClusterRole grafana-prometheus-reader for MCP..."
 	@if oc get clusterrole grafana-prometheus-reader > /dev/null 2>&1; then \
@@ -313,7 +315,7 @@ install-mcp-server: namespace
 			--set rbac.createGrafanaRole=false \
 			$(if $(MCP_SERVER_ROUTE_HOST),--set route.host='$(MCP_SERVER_ROUTE_HOST)',) \
 			$(if $(LLAMA_STACK_URL),--set llm.url='$(LLAMA_STACK_URL)',) \
-			$(if $(wildcard $(GEN_MODEL_CONFIG_PREFIX)-for_helm.yaml),-f $(GEN_MODEL_CONFIG_PREFIX)-for_helm.yaml,); \
+			-f $(GEN_MODEL_CONFIG_PREFIX)-for_helm.yaml; \
 	else \
 		echo "ClusterRole does not exist. Deploying and creating Grafana role..."; \
 		cd deploy/helm && helm upgrade --install $(MCP_SERVER_RELEASE_NAME) $(MCP_SERVER_CHART_PATH) -n $(NAMESPACE) \
@@ -322,7 +324,7 @@ install-mcp-server: namespace
 			--set rbac.createGrafanaRole=true \
 			$(if $(MCP_SERVER_ROUTE_HOST),--set route.host='$(MCP_SERVER_ROUTE_HOST)',) \
 			$(if $(LLAMA_STACK_URL),--set llm.url='$(LLAMA_STACK_URL)',) \
-			$(if $(wildcard $(GEN_MODEL_CONFIG_PREFIX)-for_helm.yaml),-f $(GEN_MODEL_CONFIG_PREFIX)-for_helm.yaml,); \
+			-f $(GEN_MODEL_CONFIG_PREFIX)-for_helm.yaml; \
 	fi
 
 .PHONY: install-rag
@@ -681,7 +683,7 @@ install-observability:
 	fi
 
 .PHONY: install-observability-stack
-install-observability-stack: install-minio setup-tracing install-observability
+install-observability-stack: install-minio setup-tracing install-observability check-observability-drift
 
 .PHONY: setup-tracing
 setup-tracing: namespace
@@ -711,6 +713,25 @@ uninstall-observability:
 
 .PHONY: uninstall-observability-stack
 uninstall-observability-stack: remove-tracing uninstall-observability uninstall-minio
+
+.PHONY: upgrade-observability
+upgrade-observability:
+	@echo "→ Force upgrading OpenTelemetry Collector and Tempo in namespace $(OBSERVABILITY_NAMESPACE)"
+	@echo "  This will update the configuration even if already installed"
+	cd deploy/helm && helm upgrade --install tempo ./observability/tempo \
+		--namespace $(OBSERVABILITY_NAMESPACE) \
+		--create-namespace \
+		--set global.namespace=$(OBSERVABILITY_NAMESPACE) \
+		$(helm_tempo_args)
+	cd deploy/helm && helm upgrade --install otel-collector ./observability/otel-collector \
+		--namespace $(OBSERVABILITY_NAMESPACE) \
+		--create-namespace \
+		--set global.namespace=$(OBSERVABILITY_NAMESPACE)
+	@echo "✅ Observability components upgraded successfully"
+
+.PHONY: check-observability-drift
+check-observability-drift:
+	@scripts/check-observability-drift.sh $(OBSERVABILITY_NAMESPACE)
 
 
 .PHONY: install-minio
