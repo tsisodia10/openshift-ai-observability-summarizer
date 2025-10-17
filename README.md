@@ -18,7 +18,7 @@ Key capabilities include automated performance analysis, predictive cost optimiz
 
 Perfect for AI operations teams, platform engineers, and business stakeholders who need to understand and optimize their AI infrastructure without becoming metrics experts.
 
-### 🚀 **Main Features**
+### **Main Features**
 - **Chat with Prometheus/Alertmanager/Tempo** - Ask questions about metrics, alerts, and traces in natural language
 - **AI-Powered Insights** - Natural language queries with intelligent responses
 - **GPU & Model Monitoring** - Real-time vLLM and DCGM metrics tracking  
