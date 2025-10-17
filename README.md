@@ -30,7 +30,7 @@ Perfect for AI operations teams, platform engineers, and business stakeholders w
 
 ### Architecture diagrams
 
-![Architecture](docs/images/arch-3.jpg)
+![Architecture](docs/images/arch-4.jpg)
 
 ## Requirements
 
