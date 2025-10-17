@@ -1,12 +1,14 @@
 # OpenShift AI Observability Summarizer
 
-**Monitor your AI models the smart way.** Get instant answers about performance, costs, and problems—in plain English, not technical jargon.
-
-Ask questions like "How is my GPU performing?" or "Why is my model slow?" and get clear, actionable insights from your OpenShift AI infrastructure.
+Create an interactive dashboard to analyze AI model performance and OpenShift cluster metrics using Prometheus.
 
 [![CNCF Compatible](https://img.shields.io/badge/CNCF%20Compatible-Yes-blue.svg)](https://www.cncf.io/)
 
 ## Detailed description
+
+**Monitor your AI models the smart way.** Get instant answers about performance, costs, and problems—in plain English, not technical jargon.
+
+Ask questions like "How is my GPU performing?" or "Why is my model slow?" and get clear, actionable insights from your OpenShift AI infrastructure.
 
 The OpenShift AI Observability Summarizer is an intelligent monitoring platform that transforms complex infrastructure metrics into actionable business insights. Built specifically for OpenShift AI environments, it provides real-time visibility into GPU utilization, model performance, and operational costs through an intuitive conversational interface.
 
@@ -15,6 +17,16 @@ This platform combines advanced AI analysis with comprehensive observability to 
 Key capabilities include automated performance analysis, predictive cost optimization, intelligent alerting, and seamless integration with existing OpenShift monitoring infrastructure. The system leverages Llama 3.2-3B for AI-powered insights and supports both real-time monitoring and historical trend analysis.
 
 Perfect for AI operations teams, platform engineers, and business stakeholders who need to understand and optimize their AI infrastructure without becoming metrics experts.
+
+### 🚀 **Main Features**
+- **Chat with Prometheus/Alertmanager/Tempo** - Ask questions about metrics, alerts, and traces in natural language
+- **AI-Powered Insights** - Natural language queries with intelligent responses
+- **GPU & Model Monitoring** - Real-time vLLM and DCGM metrics tracking  
+- **Multi-Dashboard Interface** - vLLM, OpenShift, and Chat interfaces
+- **Report Generation** - Export analysis in HTML, PDF, or Markdown
+- **Smart Alerting** - AI-powered Slack notifications and custom thresholds
+- **Distributed Tracing** - Complete observability stack with OpenTelemetry
+- **MCP Integration** - AI assistant support for Claude Desktop and Cursor IDE
 
 ### Architecture diagrams
 
