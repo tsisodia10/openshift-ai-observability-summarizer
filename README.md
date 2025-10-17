@@ -4,6 +4,8 @@
 
 Ask questions like "How is my GPU performing?" or "Why is my model slow?" and get clear, actionable insights from your OpenShift AI infrastructure.
 
+[![CNCF Compatible](https://img.shields.io/badge/CNCF%20Compatible-Yes-blue.svg)](https://www.cncf.io/)
+
 ## Detailed description
 
 The OpenShift AI Observability Summarizer is an intelligent monitoring platform that transforms complex infrastructure metrics into actionable business insights. Built specifically for OpenShift AI environments, it provides real-time visibility into GPU utilization, model performance, and operational costs through an intuitive conversational interface.
@@ -16,34 +18,27 @@ Perfect for AI operations teams, platform engineers, and business stakeholders w
 
 ### Architecture diagrams
 
-![Architecture](docs/images/arch-2.jpg)
+![Architecture](docs/images/arch-3.jpg)
 
 ## Requirements
 
-### Minimum hardware requirements
+| **Category** | **Component** | **Minimum** | **Recommended** |
+|--------------|---------------|-------------|-----------------|
+| **Hardware** | CPU Cores | 4 cores | 8 cores |
+|              | Memory | 8 Gi RAM | 16 Gi RAM |
+|              | Storage | 20Gi | 50Gi |
+|              | GPU | Optional | GPU nodes (for DCGM metrics) |
+| **Software** | OpenShift | 4.16.24 or later | 4.16.24 or later |
+|              | OpenShift AI | 2.16.2 or later | 2.16.2 or later |
+|              | Service Mesh | Red Hat OpenShift Service Mesh | Red Hat OpenShift Service Mesh |
+|              | Serverless | Red Hat OpenShift Serverless | Red Hat OpenShift Serverless |
+| **Tools** | CLI | `oc` CLI | `oc` CLI + `helm` v3.x + `yq` |
+|           | Monitoring | Prometheus/Thanos | Prometheus/Thanos |
+| **Permissions** | User Access | Standard user with project admin | Standard user with project admin |
+| **Optional** | GPU Monitoring | - | DCGM exporter |
+|              | Alerting | - | Slack Webhook URL |
+|              | Tracing | - | OpenTelemetry + Tempo Operators |
 
-* 4 cores
-* 8 Gi RAM
-* Storage: 20Gi
-
-### Recommended hardware requirements
-
-* 8 cores
-* 16 Gi RAM
-* Storage: 50Gi
-* GPU nodes (for DCGM metrics)
-
-### Minimum software requirements
-
-* Red Hat OpenShift 4.16.24 or later
-* Red Hat OpenShift AI 2.16.2 or later
-* Dependencies for model serving:
-  * Red Hat OpenShift Service Mesh
-  * Red Hat OpenShift Serverless
-
-### Required user permissions
-
-* Standard user with project admin permissions. No elevated cluster permissions required.
 
 ## Deploy
 
@@ -55,7 +50,29 @@ make install NAMESPACE=your-namespace
 ```
 This will install the project with the default LLM deployment, `llama-3-2-3b-instruct`.
 
-### Choosing different models during installation
+### Using an Existing Model
+
+To use an existing model instead of deploying a new one, specify `LLM_URL` as the model service URL:
+
+```bash
+# URL with port (no processing applied)
+make install LLM_URL=http://llama-3-2-3b-instruct-predictor.dev.svc.cluster.local:8080/v1 NAMESPACE=your-namespace
+
+# URL without port (automatically adds :8080/v1)
+make install LLM_URL=http://llama-3-2-3b-instruct-predictor.dev.svc.cluster.local NAMESPACE=your-namespace
+```
+
+**URL Processing**: If the `LLM_URL` doesn't contain a port (`:PORT` format), the system will automatically append `:8080/v1` to the URL. This simplifies configuration while maintaining flexibility for custom ports.
+
+**Token Management**: When `LLM_URL` is specified, the system will not prompt for a Hugging Face token since you're using an existing model that doesn't require new model deployment.
+
+This is useful when:
+- You already have a model deployed in your cluster
+- You want to share a model across multiple namespaces
+- You prefer not to deploy redundant model instances
+- You want to avoid unnecessary token prompts for external models
+
+### Choosing different models
 
 To see all available models:
 ```bash
@@ -81,17 +98,64 @@ make install NAMESPACE=your-namespace LLM=llama-3-2-3b-instruct
 make install NAMESPACE=your-namespace LLM=llama-3-2-3b-instruct LLM_TOLERATION="nvidia.com/gpu"
 ```
 
-### With alerting if you want to send on SLACK
+### With safety models
+```bash
+make install NAMESPACE=your-namespace \
+  LLM=llama-3-2-3b-instruct LLM_TOLERATION="nvidia.com/gpu" \
+  SAFETY=llama-guard-3-8b SAFETY_TOLERATION="nvidia.com/gpu"
+```
+
+### With alerting
 ```bash
 make install NAMESPACE=your-namespace ALERTS=TRUE
 ```
 Enabling alerting will deploy alert rules, a cron job to monitor vLLM metrics, and AI-powered Slack notifications.
+
+### Observability Stack Management
+
+The project includes a complete observability stack with flexible deployment options:
+
+#### **Complete Stack Installation**
+```bash
+# Install complete observability stack (MinIO + TempoStack + OTEL + tracing)
+# Note: NAMESPACE is required for tracing setup
+make install-observability-stack NAMESPACE=your-namespace
+
+# Uninstall complete observability stack
+# Note: NAMESPACE is required for tracing removal
+make uninstall-observability-stack NAMESPACE=your-namespace
+```
+
+#### **Individual Component Management**
+```bash
+# Install individual components
+make install-minio                                           # MinIO storage only (uses observability-hub namespace)
+make install-observability                                   # TempoStack + OTEL only (uses observability-hub namespace)
+make setup-tracing NAMESPACE=your-namespace                 # Auto-instrumentation only (requires NAMESPACE)
+
+# Uninstall individual components
+make uninstall-minio                                         # MinIO storage only (uses observability-hub namespace)
+make uninstall-observability                                 # TempoStack + OTEL only (uses observability-hub namespace)
+make remove-tracing NAMESPACE=your-namespace                 # Auto-instrumentation only (requires NAMESPACE)
+```
+
+#### **NAMESPACE Requirements**
+- **Complete Stack**: `install-observability-stack` and `uninstall-observability-stack` require NAMESPACE for tracing components
+- **Storage & Core**: `install-minio`, `uninstall-minio`, `install-observability`, `uninstall-observability` use hardcoded `observability-hub` namespace
+- **Tracing Only**: `setup-tracing` and `remove-tracing` require NAMESPACE parameter
+
+#### **Observability Features**
+- **MinIO**: S3-compatible object storage for trace data and log data
+- **TempoStack**: Multitenant trace storage and analysis
+- **OpenTelemetry Collector**: Distributed tracing collection
+- **Auto-instrumentation**: Automatic Python application tracing
 
 ### Accessing the Application
 
 The default configuration deploys:
 - **llm-service** - LLM inference
 - **llama-stack** - Backend API
+- **pgvector** - Vector database
 - **metric-ui** - Multi-dashboard Streamlit interface
 - **mcp-server** - Model Context Protocol server for metrics analysis, report generation, and AI assistant integration
 - **OpenTelemetry Collector** - Distributed tracing collection
@@ -116,12 +180,12 @@ metric-ui-route   metric-ui-route-llama-1.apps.tsisodia-spark.2vn8.p1.openshifta
 ![UI](docs/images/vllm.png)
 
 ### Chat with Prometheus 
-![UI](docs/images/chat-prom.png)
+![UI](docs/images/chat.png)
 
 ### Report Generated 
 ![UI](docs/images/report.png)
 
-### Delete
+
 To uninstall:
 
 ```bash
@@ -130,7 +194,6 @@ make uninstall NAMESPACE=your-namespace
 
 ### References
 
-* Refer to [DEVELOPER_INSIGHTS](https://github.com/rh-ai-quickstart/openshift-ai-observability-summarizer/blob/ddaa513143ad92c07df94dd873ed2ea5f87f55d0/DEVELOPER_INSIGHTS.md#:~:text=CONTRIBUTING.md-,DEVELOPER_INSIGHTS,-.md) for more insightful information of this project
 * Built on [Prometheus](https://prometheus.io/) and [Thanos](https://thanos.io/) for metrics collection
 * Uses [vLLM](https://github.com/vllm-project/vllm) for model serving
 * Powered by [Streamlit](https://streamlit.io/) for the web interface
