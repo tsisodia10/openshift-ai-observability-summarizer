@@ -62,29 +62,7 @@ make install NAMESPACE=your-namespace
 ```
 This will install the project with the default LLM deployment, `llama-3-2-3b-instruct`.
 
-### Using an Existing Model
-
-To use an existing model instead of deploying a new one, specify `LLM_URL` as the model service URL:
-
-```bash
-# URL with port (no processing applied)
-make install LLM_URL=http://llama-3-2-3b-instruct-predictor.dev.svc.cluster.local:8080/v1 NAMESPACE=your-namespace
-
-# URL without port (automatically adds :8080/v1)
-make install LLM_URL=http://llama-3-2-3b-instruct-predictor.dev.svc.cluster.local NAMESPACE=your-namespace
-```
-
-**URL Processing**: If the `LLM_URL` doesn't contain a port (`:PORT` format), the system will automatically append `:8080/v1` to the URL. This simplifies configuration while maintaining flexibility for custom ports.
-
-**Token Management**: When `LLM_URL` is specified, the system will not prompt for a Hugging Face token since you're using an existing model that doesn't require new model deployment.
-
-This is useful when:
-- You already have a model deployed in your cluster
-- You want to share a model across multiple namespaces
-- You prefer not to deploy redundant model instances
-- You want to avoid unnecessary token prompts for external models
-
-### Choosing different models
+### Choosing different models during installation
 
 To see all available models:
 ```bash
@@ -110,64 +88,17 @@ make install NAMESPACE=your-namespace LLM=llama-3-2-3b-instruct
 make install NAMESPACE=your-namespace LLM=llama-3-2-3b-instruct LLM_TOLERATION="nvidia.com/gpu"
 ```
 
-### With safety models
-```bash
-make install NAMESPACE=your-namespace \
-  LLM=llama-3-2-3b-instruct LLM_TOLERATION="nvidia.com/gpu" \
-  SAFETY=llama-guard-3-8b SAFETY_TOLERATION="nvidia.com/gpu"
-```
-
-### With alerting
+### With alerting if you want to send on SLACK
 ```bash
 make install NAMESPACE=your-namespace ALERTS=TRUE
 ```
 Enabling alerting will deploy alert rules, a cron job to monitor vLLM metrics, and AI-powered Slack notifications.
-
-### Observability Stack Management
-
-The project includes a complete observability stack with flexible deployment options:
-
-#### **Complete Stack Installation**
-```bash
-# Install complete observability stack (MinIO + TempoStack + OTEL + tracing)
-# Note: NAMESPACE is required for tracing setup
-make install-observability-stack NAMESPACE=your-namespace
-
-# Uninstall complete observability stack
-# Note: NAMESPACE is required for tracing removal
-make uninstall-observability-stack NAMESPACE=your-namespace
-```
-
-#### **Individual Component Management**
-```bash
-# Install individual components
-make install-minio                                           # MinIO storage only (uses observability-hub namespace)
-make install-observability                                   # TempoStack + OTEL only (uses observability-hub namespace)
-make setup-tracing NAMESPACE=your-namespace                 # Auto-instrumentation only (requires NAMESPACE)
-
-# Uninstall individual components
-make uninstall-minio                                         # MinIO storage only (uses observability-hub namespace)
-make uninstall-observability                                 # TempoStack + OTEL only (uses observability-hub namespace)
-make remove-tracing NAMESPACE=your-namespace                 # Auto-instrumentation only (requires NAMESPACE)
-```
-
-#### **NAMESPACE Requirements**
-- **Complete Stack**: `install-observability-stack` and `uninstall-observability-stack` require NAMESPACE for tracing components
-- **Storage & Core**: `install-minio`, `uninstall-minio`, `install-observability`, `uninstall-observability` use hardcoded `observability-hub` namespace
-- **Tracing Only**: `setup-tracing` and `remove-tracing` require NAMESPACE parameter
-
-#### **Observability Features**
-- **MinIO**: S3-compatible object storage for trace data and log data
-- **TempoStack**: Multitenant trace storage and analysis
-- **OpenTelemetry Collector**: Distributed tracing collection
-- **Auto-instrumentation**: Automatic Python application tracing
 
 ### Accessing the Application
 
 The default configuration deploys:
 - **llm-service** - LLM inference
 - **llama-stack** - Backend API
-- **pgvector** - Vector database
 - **metric-ui** - Multi-dashboard Streamlit interface
 - **mcp-server** - Model Context Protocol server for metrics analysis, report generation, and AI assistant integration
 - **OpenTelemetry Collector** - Distributed tracing collection
